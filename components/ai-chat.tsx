@@ -1217,12 +1217,14 @@ export function AIChat({
                     source: 'chat'
                   });
                 }}
-                onTakeNote={(payload) => {
-                  onTakeNoteFromSelection?.({
-                    ...payload,
-                    source: 'chat'
-                  });
-                }}
+                onTakeNote={onTakeNoteFromSelection
+                  ? (payload) => {
+                      onTakeNoteFromSelection({
+                        ...payload,
+                        source: 'chat'
+                      });
+                    }
+                  : undefined}
                 source="chat"
               />
               {messages.map((message) => {

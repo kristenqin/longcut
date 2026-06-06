@@ -34,6 +34,7 @@ interface RightColumnTabsProps {
   videoInfo?: VideoInfo | null;
   onCitationClick: (citation: Citation) => void;
   showChatTab?: boolean;
+  showNotesTab?: boolean;
   cachedSuggestedQuestions?: string[] | null;
   notes?: Note[];
   onSaveNote?: (payload: { text: string; source: NoteSource; sourceId?: string | null; metadata?: NoteMetadata | null }) => Promise<void>;
@@ -76,7 +77,8 @@ export const RightColumnTabs = forwardRef<RightColumnTabsHandle, RightColumnTabs
   videoTitle,
   videoInfo,
   onCitationClick,
-  showChatTab,
+  showChatTab = false,
+  showNotesTab = true,
   cachedSuggestedQuestions,
   notes,
   onSaveNote,
@@ -110,16 +112,18 @@ export const RightColumnTabs = forwardRef<RightColumnTabsHandle, RightColumnTabs
       }
     },
     switchToNotes: () => {
-      setActiveTab("notes");
+      if (showNotesTab) {
+        setActiveTab("notes");
+      }
     }
   }));
 
   useEffect(() => {
-    // If chat tab is removed while active, switch to transcript
-    if (!showChatTab && activeTab === "chat") {
+    // If an optional tab is removed while active, switch to transcript.
+    if ((!showChatTab && activeTab === "chat") || (!showNotesTab && activeTab === "notes")) {
       setActiveTab("transcript");
     }
-  }, [showChatTab, activeTab]);
+  }, [showChatTab, showNotesTab, activeTab]);
 
   return (
     <Card className="h-full flex flex-col overflow-hidden p-0 gap-0 border-0">
@@ -176,21 +180,23 @@ export const RightColumnTabs = forwardRef<RightColumnTabsHandle, RightColumnTabs
             Chat
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setActiveTab("notes")}
-          className={cn(
-            "flex-1 justify-center gap-2 rounded-2xl",
-            activeTab === "notes"
-              ? "bg-neutral-100 text-foreground"
-              : "text-muted-foreground hover:text-foreground hover:bg-white/50",
-            notes?.length ? undefined : "opacity-75"
-          )}
-        >
-          <PenLine className="h-4 w-4" />
-          Notes
-        </Button>
+        {showNotesTab && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setActiveTab("notes")}
+            className={cn(
+              "flex-1 justify-center gap-2 rounded-2xl",
+              activeTab === "notes"
+                ? "bg-neutral-100 text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-white/50",
+              notes?.length ? undefined : "opacity-75"
+            )}
+          >
+            <PenLine className="h-4 w-4" />
+            Notes
+          </Button>
+        )}
       </div>
 
       <div className="flex-1 overflow-hidden relative">
@@ -208,44 +214,49 @@ export const RightColumnTabs = forwardRef<RightColumnTabsHandle, RightColumnTabs
             selectedLanguage={selectedLanguage}
             onRequestTranslation={onRequestTranslation}
             onRequestExport={onRequestExport}
+            enableExplainSelection={showChatTab}
             exportButtonState={exportButtonState}
           />
         </div>
         <div className={cn("absolute inset-0", (activeTab !== "chat" || !showChatTab) && "hidden")}>
-          <AIChat
-            transcript={transcript}
-            topics={topics || []}
-            videoId={videoId}
-            videoTitle={videoTitle}
-            videoInfo={videoInfo}
-            onCitationClick={onCitationClick}
-            onTimestampClick={onTimestampClick}
-            cachedSuggestedQuestions={cachedSuggestedQuestions}
-            onSaveNote={onSaveNote}
-            onTakeNoteFromSelection={onTakeNoteFromSelection}
-            selectedLanguage={selectedLanguage}
-            translationCache={translationCache}
-            onRequestTranslation={onRequestTranslation}
-            isAuthenticated={isAuthenticated}
-            onRequestSignIn={onRequestSignIn}
-          />
-        </div>
-        <div className={cn("absolute inset-0", activeTab !== "notes" && "hidden")}
-        >
-          <TooltipProvider delayDuration={0}>
-            <NotesPanel
-              notes={notes}
-              editingNote={editingNote}
-              onSaveEditingNote={onSaveEditingNote}
-              onCancelEditing={onCancelEditing}
-              isAuthenticated={isAuthenticated}
-              onSignInClick={onRequestSignIn}
-              currentTime={currentTime}
+          {showChatTab && (
+            <AIChat
+              transcript={transcript}
+              topics={topics || []}
+              videoId={videoId}
+              videoTitle={videoTitle}
+              videoInfo={videoInfo}
+              onCitationClick={onCitationClick}
               onTimestampClick={onTimestampClick}
-              onAddNote={onAddNote}
+              cachedSuggestedQuestions={cachedSuggestedQuestions}
+              onSaveNote={onSaveNote}
+              onTakeNoteFromSelection={onTakeNoteFromSelection}
+              selectedLanguage={selectedLanguage}
+              translationCache={translationCache}
+              onRequestTranslation={onRequestTranslation}
+              isAuthenticated={isAuthenticated}
+              onRequestSignIn={onRequestSignIn}
             />
-          </TooltipProvider>
+          )}
         </div>
+        {showNotesTab && (
+          <div className={cn("absolute inset-0", activeTab !== "notes" && "hidden")}
+          >
+            <TooltipProvider delayDuration={0}>
+              <NotesPanel
+                notes={notes}
+                editingNote={editingNote}
+                onSaveEditingNote={onSaveEditingNote}
+                onCancelEditing={onCancelEditing}
+                isAuthenticated={isAuthenticated}
+                onSignInClick={onRequestSignIn}
+                currentTime={currentTime}
+                onTimestampClick={onTimestampClick}
+                onAddNote={onAddNote}
+              />
+            </TooltipProvider>
+          </div>
+        )}
       </div>
     </Card>
   );

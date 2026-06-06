@@ -25,6 +25,7 @@ interface TranscriptViewerProps {
   selectedLanguage?: string | null;
   onRequestTranslation?: TranslationRequestHandler;
   onRequestExport?: () => void;
+  enableExplainSelection?: boolean;
   exportButtonState?: {
     tooltip?: string;
     disabled?: boolean;
@@ -45,6 +46,7 @@ export function TranscriptViewer({
   selectedLanguage = null,
   onRequestTranslation,
   onRequestExport,
+  enableExplainSelection = true,
   exportButtonState,
 }: TranscriptViewerProps) {
   const highlightedRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -775,18 +777,23 @@ export function TranscriptViewer({
           >
             <SelectionActions
               containerRef={scrollViewportRef}
-              onExplain={(payload) => {
-                triggerExplainSelection({
-                  ...payload,
-                  source: 'transcript'
-                });
-              }}
-              onTakeNote={(payload) => {
-                onTakeNoteFromSelection?.({
-                  ...payload,
-                  source: 'transcript'
-                });
-              }}
+              disabled={!enableExplainSelection && !onTakeNoteFromSelection}
+              onExplain={enableExplainSelection
+                ? (payload) => {
+                    triggerExplainSelection({
+                      ...payload,
+                      source: 'transcript'
+                    });
+                  }
+                : undefined}
+              onTakeNote={onTakeNoteFromSelection
+                ? (payload) => {
+                    onTakeNoteFromSelection({
+                      ...payload,
+                      source: 'transcript'
+                    });
+                  }
+                : undefined}
               getMetadata={(range) => {
                 const metadata: NoteMetadata = {};
                 const startNode = range.startContainer.parentElement;

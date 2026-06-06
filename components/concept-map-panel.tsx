@@ -17,8 +17,6 @@ interface ConceptMapPanelProps {
   error: string | null;
   onGenerate: () => void;
   onSeek: (seconds: number) => void;
-  isAuthenticated: boolean;
-  onRequestSignIn: () => void;
 }
 
 function formatTime(seconds: number) {
@@ -39,8 +37,6 @@ export function ConceptMapPanel({
   error,
   onGenerate,
   onSeek,
-  isAuthenticated,
-  onRequestSignIn,
 }: ConceptMapPanelProps) {
   const [selectedConceptId, setSelectedConceptId] = useState<string | null>(null);
   const selectedConcept = useMemo(
@@ -73,7 +69,7 @@ export function ConceptMapPanel({
         <Button
           type="button"
           size="sm"
-          onClick={isAuthenticated ? onGenerate : onRequestSignIn}
+          onClick={onGenerate}
           disabled={isLoading}
         >
           {isLoading ? (

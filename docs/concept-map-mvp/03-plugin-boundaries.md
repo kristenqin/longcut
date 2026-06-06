@@ -89,3 +89,16 @@ type AnalysisPlugin<TOutput> = {
 - Player Bridge 不应该知道 AI 输出来自高光片段还是概念图。
 - 存储表字段不应该继续使用 `youtube_id` 作为唯一平台标识。
 - 插件不应该在主流程完成前阻塞 metadata、transcript、Concept Map 或播放器初始化。
+
+## 当前 MVP 开关
+
+MVP 采用静态 feature flag 隔离非主流程插件。默认都应为 `false`，主流程只保留视频、Transcript、Concept Map 和 evidence 回跳。
+
+| Flag | 对应插件能力 |
+| --- | --- |
+| `NEXT_PUBLIC_ENABLE_HIGHLIGHT_REELS` | 旧高光片段、主题选择器 |
+| `NEXT_PUBLIC_ENABLE_CHAT_PLUGIN` | Chat 面板、Explain selection |
+| `NEXT_PUBLIC_ENABLE_NOTES_PLUGIN` | Notes 面板、Take Notes selection |
+| `NEXT_PUBLIC_ENABLE_TRANSCRIPT_EXPORT` | Transcript export |
+| `NEXT_PUBLIC_ENABLE_QUICK_PREVIEW` | Quick preview 自动生成 |
+| `NEXT_PUBLIC_ENABLE_TAKEAWAYS_PLUGIN` | Takeaways 自动生成 |

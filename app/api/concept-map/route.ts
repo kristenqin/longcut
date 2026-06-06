@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { withSecurity, SECURITY_PRESETS } from '@/lib/security-middleware';
+import { withSecurity } from '@/lib/security-middleware';
+import { RATE_LIMITS } from '@/lib/rate-limiter';
 import { createClient } from '@/lib/supabase/server';
 import { generateConceptMapFromTranscript } from '@/lib/concept-map';
 import {
@@ -31,6 +32,13 @@ const conceptMapRequestSchema = z.object({
   maxConcepts: z.number().int().min(4).max(24).optional(),
 });
 
+const CONCEPT_MAP_SECURITY = {
+  rateLimit: RATE_LIMITS.AUTH_GENERATION,
+  maxBodySize: 10 * 1024 * 1024,
+  allowedMethods: ['POST'],
+  csrfProtection: false,
+};
+
 function buildYouTubeRef(videoId: string): VideoRef {
   return {
     platform: 'youtube',
@@ -59,14 +67,9 @@ function normalizeVideoRef(body: z.infer<typeof conceptMapRequestSchema>): Video
 
 async function handler(req: NextRequest) {
   const supabase = await createClient();
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError || !user) {
-    return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-  }
+  const { data: { user } } = await supabase.auth
+    .getUser()
+    .catch(() => ({ data: { user: null } }));
 
   let parsedBody;
   try {
@@ -92,7 +95,9 @@ async function handler(req: NextRequest) {
     );
   }
 
-  const userAIConfig = await resolveUserAIProviderConfig(supabase, user.id);
+  const userAIConfig = user
+    ? await resolveUserAIProviderConfig(supabase, user.id)
+    : null;
   const transcript = createTranscriptResult(parsedBody.transcript, {
     idPrefix: `${videoRef.platform}-${videoRef.platformVideoId}`,
     language: parsedBody.videoInfo?.language,
@@ -101,28 +106,53 @@ async function handler(req: NextRequest) {
     source: 'unknown',
   });
 
-  const analysis = await generateConceptMapFromTranscript({
-    videoRef,
-    metadata: parsedBody.videoInfo
-      ? {
-          platform: videoRef.platform,
-          platformVideoId: videoRef.platformVideoId,
-          platformPartId: videoRef.platformPartId,
-          canonicalUrl: videoRef.canonicalUrl,
-          ...parsedBody.videoInfo,
-        }
-      : undefined,
-    transcript,
-    provider: userAIConfig?.provider,
-    model: userAIConfig?.model,
-    configSource: userAIConfig ? 'user' : 'workspace_default',
-    maxConcepts: parsedBody.maxConcepts,
-    generateAI: userAIConfig
-      ? createUserConfiguredGenerateAI(userAIConfig)
-      : undefined,
-  });
+  let analysis;
+  try {
+    analysis = await generateConceptMapFromTranscript({
+      videoRef,
+      metadata: parsedBody.videoInfo
+        ? {
+            platform: videoRef.platform,
+            platformVideoId: videoRef.platformVideoId,
+            platformPartId: videoRef.platformPartId,
+            canonicalUrl: videoRef.canonicalUrl,
+            ...parsedBody.videoInfo,
+          }
+        : undefined,
+      transcript,
+      provider: userAIConfig?.provider,
+      model: userAIConfig?.model,
+      configSource: userAIConfig ? 'user' : 'workspace_default',
+      maxConcepts: parsedBody.maxConcepts,
+      generateAI: userAIConfig
+        ? createUserConfiguredGenerateAI(userAIConfig)
+        : undefined,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to generate Concept Map';
+
+    if (message.includes('AI provider') && message.includes('not configured')) {
+      return NextResponse.json(
+        {
+          error: 'AI provider is not configured.',
+          details:
+            'Set DEEPSEEK_API_KEY in the workspace environment or sign in and save a personal DeepSeek key in Settings.',
+        },
+        { status: 503 }
+      );
+    }
+
+    console.error('Concept Map generation failed:', error);
+    return NextResponse.json(
+      {
+        error: 'Failed to generate Concept Map.',
+        details: message,
+      },
+      { status: 502 }
+    );
+  }
 
   return NextResponse.json({ analysis });
 }
 
-export const POST = withSecurity(handler, SECURITY_PRESETS.AUTHENTICATED);
+export const POST = withSecurity(handler, CONCEPT_MAP_SECURITY);

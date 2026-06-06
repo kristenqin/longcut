@@ -53,6 +53,21 @@ const GUEST_LIMIT_MESSAGE = "You've used your free preview. Create a free accoun
 const AUTH_LIMIT_MESSAGE = "You've used all 3 free videos this month. Upgrade to Pro for 100 videos/month.";
 const DEFAULT_CLIENT_ERROR = "Something went wrong. Please try again.";
 
+function parseClientFeatureFlag(raw: string | undefined): boolean {
+  if (!raw) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
+}
+
+const optionalAnalysisFeatures = {
+  highlights: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_HIGHLIGHT_REELS),
+  chat: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_CHAT_PLUGIN),
+  notes: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_NOTES_PLUGIN),
+  transcriptExport: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_TRANSCRIPT_EXPORT),
+  quickPreview: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_QUICK_PREVIEW),
+  takeaways: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_TAKEAWAYS_PLUGIN),
+};
+
 type LimitCheckResponse = {
   canGenerate: boolean;
   isAuthenticated: boolean;
@@ -424,11 +439,6 @@ export default function AnalyzePage() {
       return;
     }
 
-    if (!user) {
-      handleAuthRequired();
-      return;
-    }
-
     const requestKey = 'concept-map';
     const controller = abortManager.current.createController(requestKey);
     setConceptMapError(null);
@@ -442,7 +452,7 @@ export default function AnalyzePage() {
           videoId,
           videoInfo,
           transcript,
-          maxConcepts: 12,
+          maxConcepts: 6,
         },
         { signal: controller.signal }
       );
@@ -450,11 +460,6 @@ export default function AnalyzePage() {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          handleAuthRequired();
-          return;
-        }
-
         throw new Error(buildApiErrorMessage(data, "Failed to generate Concept Map"));
       }
 
@@ -483,8 +488,6 @@ export default function AnalyzePage() {
     videoId,
     transcript,
     isGeneratingConceptMap,
-    user,
-    handleAuthRequired,
     videoInfo,
   ]);
 
@@ -795,13 +798,15 @@ export default function AnalyzePage() {
                 setVideoInfo(null);
               }
 
-              // Set cached takeaways and questions
-              if (cacheData.summary) {
+              // Optional plugin data can be restored from cache without driving the MVP flow.
+              if (optionalAnalysisFeatures.takeaways && cacheData.summary) {
                 setTakeawaysContent(cacheData.summary);
-                setShowChatTab(true);
+                if (optionalAnalysisFeatures.chat) {
+                  setShowChatTab(true);
+                }
                 setIsGeneratingTakeaways(false);
               }
-              if (cacheData.suggestedQuestions) {
+              if (optionalAnalysisFeatures.chat && cacheData.suggestedQuestions) {
                 setCachedSuggestedQuestions(cacheData.suggestedQuestions);
               }
 
@@ -846,9 +851,10 @@ export default function AnalyzePage() {
                 }
               );
 
-              // Auto-start takeaways generation if not available
-              if (!cacheData.summary) {
-                setShowChatTab(true);
+              if (optionalAnalysisFeatures.takeaways && !cacheData.summary) {
+                if (optionalAnalysisFeatures.chat) {
+                  setShowChatTab(true);
+                }
                 setIsGeneratingTakeaways(true);
 
                 backgroundOperation(
@@ -1039,99 +1045,101 @@ export default function AnalyzePage() {
       // Move to understanding stage
       setLoadingStage('understanding');
 
-      // Generate quick preview (non-blocking)
-      fetch("/api/quick-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transcript: normalizedTranscriptData,
-          videoTitle: fetchedVideoInfo?.title,
-          videoDescription: fetchedVideoInfo?.description,
-          channelName: fetchedVideoInfo?.author,
-          tags: fetchedVideoInfo?.tags,
-          language: fetchedVideoInfo?.language
-        }),
-      })
-        .then(res => {
-          if (!res.ok) {
-            console.error('Quick preview generation failed:', res.status);
-            return null;
-          }
-          return res.json();
+      if (optionalAnalysisFeatures.quickPreview) {
+        fetch("/api/quick-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            transcript: normalizedTranscriptData,
+            videoTitle: fetchedVideoInfo?.title,
+            videoDescription: fetchedVideoInfo?.description,
+            channelName: fetchedVideoInfo?.author,
+            tags: fetchedVideoInfo?.tags,
+            language: fetchedVideoInfo?.language
+          }),
         })
-        .then(data => {
-          if (data && data.preview) {
-            console.log('Quick preview generated:', data.preview);
-            setVideoPreview(data.preview);
-          }
-        })
-        .catch((error) => {
-          console.error('Error generating quick preview:', error);
-        });
-
-      // Generate takeaways in the background. Highlight reels are intentionally
-      // deferred until the user clicks the generate button.
-      const takeawaysController = abortManager.current.createController('takeaways', 60000);
-
-      // Show takeaways tab and loading state immediately (optimistic UI)
-      setShowChatTab(true);
-      setIsGeneratingTakeaways(true);
-      backgroundOperation(
-        'generate-takeaways',
-        async () => {
-          const summaryRes = await fetch("/api/generate-summary", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              transcript: normalizedTranscriptData,
-              videoInfo: fetchedVideoInfo,
-              videoId: extractedVideoId,
-              targetLanguage: fetchedVideoInfo?.language
-            }),
-            signal: takeawaysController.signal,
-          });
-
-          if (!summaryRes.ok) {
-            const errorData = await summaryRes.json().catch(() => ({ error: "Unknown error" }));
-            setTakeawaysError(buildApiErrorMessage(errorData, "Failed to generate takeaways. Please try again."));
-            return null;
-          }
-
-          const summaryData = await summaryRes.json();
-          const generatedTakeaways = summaryData.summaryContent;
-          setTakeawaysContent(generatedTakeaways);
-
-          await backgroundOperation(
-            'update-takeaways',
-            async () => {
-              const updateRes = await csrfFetch.post("/api/update-video-analysis", {
-                videoId: extractedVideoId,
-                summary: generatedTakeaways
-              });
-
-              if (!updateRes.ok && updateRes.status !== 404 && updateRes.status !== 401 && updateRes.status !== 403) {
-                throw new Error('Failed to update takeaways');
-              }
+          .then(res => {
+            if (!res.ok) {
+              console.error('Quick preview generation failed:', res.status);
+              return null;
             }
-          );
+            return res.json();
+          })
+          .then(data => {
+            if (data && data.preview) {
+              console.log('Quick preview generated:', data.preview);
+              setVideoPreview(data.preview);
+            }
+          })
+          .catch((error) => {
+            console.error('Error generating quick preview:', error);
+          });
+      }
 
-          return generatedTakeaways;
-        },
-        (error) => {
-          const isAbortError =
-            typeof error === "object" &&
-            error !== null &&
-            "name" in error &&
-            (error as { name?: string }).name === "AbortError";
+      if (optionalAnalysisFeatures.takeaways) {
+        const takeawaysController = abortManager.current.createController('takeaways', 60000);
 
-          if (!isAbortError) {
-            setTakeawaysError(error.message || "Failed to generate takeaways. Please try again.");
-          }
+        if (optionalAnalysisFeatures.chat) {
+          setShowChatTab(true);
         }
-      ).finally(() => {
-        abortManager.current.cleanup('takeaways');
-        setIsGeneratingTakeaways(false);
-      });
+        setIsGeneratingTakeaways(true);
+        backgroundOperation(
+          'generate-takeaways',
+          async () => {
+            const summaryRes = await fetch("/api/generate-summary", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                transcript: normalizedTranscriptData,
+                videoInfo: fetchedVideoInfo,
+                videoId: extractedVideoId,
+                targetLanguage: fetchedVideoInfo?.language
+              }),
+              signal: takeawaysController.signal,
+            });
+
+            if (!summaryRes.ok) {
+              const errorData = await summaryRes.json().catch(() => ({ error: "Unknown error" }));
+              setTakeawaysError(buildApiErrorMessage(errorData, "Failed to generate takeaways. Please try again."));
+              return null;
+            }
+
+            const summaryData = await summaryRes.json();
+            const generatedTakeaways = summaryData.summaryContent;
+            setTakeawaysContent(generatedTakeaways);
+
+            await backgroundOperation(
+              'update-takeaways',
+              async () => {
+                const updateRes = await csrfFetch.post("/api/update-video-analysis", {
+                  videoId: extractedVideoId,
+                  summary: generatedTakeaways
+                });
+
+                if (!updateRes.ok && updateRes.status !== 404 && updateRes.status !== 401 && updateRes.status !== 403) {
+                  throw new Error('Failed to update takeaways');
+                }
+              }
+            );
+
+            return generatedTakeaways;
+          },
+          (error) => {
+            const isAbortError =
+              typeof error === "object" &&
+              error !== null &&
+              "name" in error &&
+              (error as { name?: string }).name === "AbortError";
+
+            if (!isAbortError) {
+              setTakeawaysError(error.message || "Failed to generate takeaways. Please try again.");
+            }
+          }
+        ).finally(() => {
+          abortManager.current.cleanup('takeaways');
+          setIsGeneratingTakeaways(false);
+        });
+      }
 
     } catch (err) {
       setError(
@@ -1289,7 +1297,7 @@ export default function AnalyzePage() {
     sourceTranscript: TranscriptSegment[],
     sourceVideoInfo: VideoInfo | null
   ) => {
-    if (!videoId) return;
+    if (!optionalAnalysisFeatures.chat || !videoId) return;
 
     backgroundOperation(
       'generate-questions',
@@ -1744,7 +1752,7 @@ export default function AnalyzePage() {
   const [editingNote, setEditingNote] = useState<EditingNote | null>(null);
 
   useEffect(() => {
-    if (!videoId || !user) {
+    if (!optionalAnalysisFeatures.notes || !videoId || !user) {
       setNotes([]);
       return;
     }
@@ -1760,6 +1768,10 @@ export default function AnalyzePage() {
 
   // Auto-switch to Chat tab when Explain is triggered from transcript
   useEffect(() => {
+    if (!optionalAnalysisFeatures.chat) {
+      return;
+    }
+
     const handleExplainFromSelection = () => {
       // Switch to chat tab when explain is triggered
       rightColumnTabsRef.current?.switchToChat?.();
@@ -2020,7 +2032,7 @@ export default function AnalyzePage() {
                   selectedLanguage={selectedLanguage}
                   onRequestTranslation={translateWithContext}
                 />
-                {(themes.length > 0 || isLoadingThemeTopics || themeError || selectedTheme) && (
+                {optionalAnalysisFeatures.highlights && (themes.length > 0 || isLoadingThemeTopics || themeError || selectedTheme) && (
                   <div className="flex justify-center">
                     <ThemeSelector
                       themes={themes}
@@ -2040,30 +2052,30 @@ export default function AnalyzePage() {
                   error={conceptMapError}
                   onGenerate={handleGenerateConceptMap}
                   onSeek={requestSeek}
-                  isAuthenticated={!!user}
-                  onRequestSignIn={handleAuthRequired}
                 />
-                <HighlightsPanel
-                  topics={topics}
-                  selectedTopic={selectedTopic}
-                  onTopicSelect={(topic) => handleTopicSelect(topic)}
-                  onPlayTopic={requestPlayTopic}
-                  onSeek={requestSeek}
-                  onPlayAll={handleTogglePlayAll}
-                  isPlayingAll={isPlayingAll}
-                  playAllIndex={playAllIndex}
-                  currentTime={currentTime}
-                  videoDuration={videoDuration}
-                  transcript={transcript}
-                  isLoadingThemeTopics={isLoadingThemeTopics}
-                  videoId={videoId ?? undefined}
-                  selectedLanguage={selectedLanguage}
-                  onRequestTranslation={translateWithContext}
-                  onGenerateHighlights={handleGenerateHighlights}
-                  isGeneratingHighlights={isGeneratingHighlights}
-                  highlightGenerationElapsedTime={highlightGenerationElapsedTime}
-                  highlightGenerationError={highlightGenerationError}
-                />
+                {optionalAnalysisFeatures.highlights && (
+                  <HighlightsPanel
+                    topics={topics}
+                    selectedTopic={selectedTopic}
+                    onTopicSelect={(topic) => handleTopicSelect(topic)}
+                    onPlayTopic={requestPlayTopic}
+                    onSeek={requestSeek}
+                    onPlayAll={handleTogglePlayAll}
+                    isPlayingAll={isPlayingAll}
+                    playAllIndex={playAllIndex}
+                    currentTime={currentTime}
+                    videoDuration={videoDuration}
+                    transcript={transcript}
+                    isLoadingThemeTopics={isLoadingThemeTopics}
+                    videoId={videoId ?? undefined}
+                    selectedLanguage={selectedLanguage}
+                    onRequestTranslation={translateWithContext}
+                    onGenerateHighlights={handleGenerateHighlights}
+                    isGeneratingHighlights={isGeneratingHighlights}
+                    highlightGenerationElapsedTime={highlightGenerationElapsedTime}
+                    highlightGenerationError={highlightGenerationError}
+                  />
+                )}
               </div>
             </div>
 
@@ -2086,15 +2098,16 @@ export default function AnalyzePage() {
                   videoTitle={videoInfo?.title}
                   videoInfo={videoInfo}
                   onCitationClick={handleCitationClick}
-                  showChatTab={showChatTab}
-                  cachedSuggestedQuestions={cachedSuggestedQuestions}
-                  notes={notes}
-                  onSaveNote={handleSaveNote}
-                  onTakeNoteFromSelection={handleTakeNoteFromSelection}
-                  editingNote={editingNote}
-                  onSaveEditingNote={handleSaveEditingNote}
-                  onCancelEditing={handleCancelEditing}
-                  onAddNote={handleAddNote}
+                  showChatTab={optionalAnalysisFeatures.chat && showChatTab}
+                  showNotesTab={optionalAnalysisFeatures.notes}
+                  cachedSuggestedQuestions={optionalAnalysisFeatures.chat ? cachedSuggestedQuestions : null}
+                  notes={optionalAnalysisFeatures.notes ? notes : []}
+                  onSaveNote={optionalAnalysisFeatures.notes ? handleSaveNote : undefined}
+                  onTakeNoteFromSelection={optionalAnalysisFeatures.notes ? handleTakeNoteFromSelection : undefined}
+                  editingNote={optionalAnalysisFeatures.notes ? editingNote : null}
+                  onSaveEditingNote={optionalAnalysisFeatures.notes ? handleSaveEditingNote : undefined}
+                  onCancelEditing={optionalAnalysisFeatures.notes ? handleCancelEditing : undefined}
+                  onAddNote={optionalAnalysisFeatures.notes ? handleAddNote : undefined}
                   isAuthenticated={!!user}
                   onRequestSignIn={handleAuthRequired}
                   selectedLanguage={selectedLanguage}
@@ -2119,8 +2132,8 @@ export default function AnalyzePage() {
                   }}
                   availableLanguages={videoInfo?.availableLanguages}
                   currentSourceLanguage={videoInfo?.language}
-                  onRequestExport={handleRequestExport}
-                  exportButtonState={exportButtonState}
+                  onRequestExport={optionalAnalysisFeatures.transcriptExport ? handleRequestExport : undefined}
+                  exportButtonState={optionalAnalysisFeatures.transcriptExport ? exportButtonState : undefined}
                 />
               </div>
             </div>
@@ -2148,34 +2161,38 @@ export default function AnalyzePage() {
         }}
         currentVideoId={videoId}
       />
-      <TranscriptExportDialog
-        open={isExportDialogOpen}
-        onOpenChange={handleExportDialogOpenChange}
-        format={exportFormat}
-        onFormatChange={setExportFormat}
-        exportMode={exportMode}
-        onExportModeChange={setExportMode}
-        targetLanguage={targetLanguage}
-        onTargetLanguageChange={setTargetLanguage}
-        includeSpeakers={includeSpeakers}
-        onIncludeSpeakersChange={(value) => setIncludeSpeakers(value && hasSpeakerData)}
-        includeTimestamps={includeTimestamps}
-        onIncludeTimestampsChange={setIncludeTimestamps}
-        disableTimestampToggle={exportFormat === 'srt'}
-        onConfirm={handleConfirmExport}
-        isExporting={isExportingTranscript}
-        error={exportErrorMessage}
-        disableDownloadMessage={exportDisableMessage}
-        hasSpeakerData={hasSpeakerData}
-        willConsumeTopup={subscriptionStatus?.willConsumeTopup}
-        videoTitle={videoInfo?.title}
-        translationProgress={translationProgress}
-      />
-      <TranscriptExportUpsell
-        open={showExportUpsell}
-        onOpenChange={setShowExportUpsell}
-        onUpgradeClick={handleUpgradeClick}
-      />
+      {optionalAnalysisFeatures.transcriptExport && (
+        <>
+          <TranscriptExportDialog
+            open={isExportDialogOpen}
+            onOpenChange={handleExportDialogOpenChange}
+            format={exportFormat}
+            onFormatChange={setExportFormat}
+            exportMode={exportMode}
+            onExportModeChange={setExportMode}
+            targetLanguage={targetLanguage}
+            onTargetLanguageChange={setTargetLanguage}
+            includeSpeakers={includeSpeakers}
+            onIncludeSpeakersChange={(value) => setIncludeSpeakers(value && hasSpeakerData)}
+            includeTimestamps={includeTimestamps}
+            onIncludeTimestampsChange={setIncludeTimestamps}
+            disableTimestampToggle={exportFormat === 'srt'}
+            onConfirm={handleConfirmExport}
+            isExporting={isExportingTranscript}
+            error={exportErrorMessage}
+            disableDownloadMessage={exportDisableMessage}
+            hasSpeakerData={hasSpeakerData}
+            willConsumeTopup={subscriptionStatus?.willConsumeTopup}
+            videoTitle={videoInfo?.title}
+            translationProgress={translationProgress}
+          />
+          <TranscriptExportUpsell
+            open={showExportUpsell}
+            onOpenChange={setShowExportUpsell}
+            onUpgradeClick={handleUpgradeClick}
+          />
+        </>
+      )}
     </div>
   );
 }

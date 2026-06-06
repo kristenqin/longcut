@@ -124,6 +124,12 @@ Create `.env.local` in the repo root:
 | `NEXT_PUBLIC_AI_MODEL` | optional | Client-side model hint for UI/config display; does not control server routing by itself |
 | `NEXT_PUBLIC_APP_URL` | optional | Canonical app URL (defaults to `http://localhost:3000`) |
 | `NEXT_PUBLIC_ENABLE_TRANSLATION_SELECTOR` | optional | Set to `true` to show the transcript translation dropdown (hidden otherwise) |
+| `NEXT_PUBLIC_ENABLE_HIGHLIGHT_REELS` | optional | Set to `true` to show legacy highlight reels as an optional plugin |
+| `NEXT_PUBLIC_ENABLE_CHAT_PLUGIN` | optional | Set to `true` to show the chat panel and explain-selection actions |
+| `NEXT_PUBLIC_ENABLE_NOTES_PLUGIN` | optional | Set to `true` to show notes and take-note actions |
+| `NEXT_PUBLIC_ENABLE_TRANSCRIPT_EXPORT` | optional | Set to `true` to show transcript export controls |
+| `NEXT_PUBLIC_ENABLE_QUICK_PREVIEW` | optional | Set to `true` to run quick preview generation after transcript fetch |
+| `NEXT_PUBLIC_ENABLE_TAKEAWAYS_PLUGIN` | optional | Set to `true` to run takeaways generation as an optional plugin |
 | `YOUTUBE_PROXY_URL` | optional | HTTP proxy used by the server-side YouTube transcript and metadata fetchers, e.g. `http://127.0.0.1:7897` for local proxy tools |
 | `YOUTUBE_API_KEY` | optional | Enables additional metadata when available |
 | `UNLIMITED_VIDEO_USERS` | optional | Comma-separated emails or user IDs allowed to bypass daily limits |
