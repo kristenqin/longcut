@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { RightColumnTabs, type RightColumnTabsHandle } from "@/components/right-column-tabs";
 import { YouTubePlayer, type YouTubePlayerHandle } from "@/components/youtube-player";
+import { ConceptMapPanel } from "@/components/concept-map-panel";
 import { HighlightsPanel } from "@/components/highlights-panel";
 import { ThemeSelector } from "@/components/theme-selector";
 import { LoadingContext } from "@/components/loading-context";
@@ -46,6 +47,7 @@ import { csrfFetch } from "@/lib/csrf-client";
 import { toast } from "sonner";
 import { hasSpeakerMetadata } from "@/lib/transcript-export";
 import { buildSuggestedQuestionFallbacks } from "@/lib/suggested-question-fallback";
+import type { ConceptMapAnalysis } from "@/lib/concept-map";
 
 const GUEST_LIMIT_MESSAGE = "You've used your free preview. Create a free account for 3 videos/month.";
 const AUTH_LIMIT_MESSAGE = "You've used all 3 free videos this month. Upgrade to Pro for 100 videos/month.";
@@ -216,6 +218,10 @@ export default function AnalyzePage() {
   const [isGeneratingHighlights, setIsGeneratingHighlights] = useState(false);
   const [highlightGenerationError, setHighlightGenerationError] = useState<string | null>(null);
   const [highlightGenerationStartTime, setHighlightGenerationStartTime] = useState<number | null>(null);
+  const [conceptMap, setConceptMap] = useState<ConceptMapAnalysis | null>(null);
+  const [isGeneratingConceptMap, setIsGeneratingConceptMap] = useState(false);
+  const [conceptMapError, setConceptMapError] = useState<string | null>(null);
+  const [conceptMapGenerationStartTime, setConceptMapGenerationStartTime] = useState<number | null>(null);
   const [themeError, setThemeError] = useState<string | null>(null);
   const [switchingToLanguage, setSwitchingToLanguage] = useState<string | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
@@ -314,6 +320,7 @@ export default function AnalyzePage() {
 
   // Use custom hook for timer logic
   const highlightGenerationElapsedTime = useElapsedTimer(highlightGenerationStartTime);
+  const conceptMapGenerationElapsedTime = useElapsedTimer(conceptMapGenerationStartTime);
 
   // Auth and generation limit state
   const { user } = useAuth();
@@ -411,6 +418,75 @@ export default function AnalyzePage() {
 
     setPlaybackCommand({ type: 'SEEK', time });
   }, []);
+
+  const handleGenerateConceptMap = useCallback(async () => {
+    if (!videoId || transcript.length === 0 || isGeneratingConceptMap) {
+      return;
+    }
+
+    if (!user) {
+      handleAuthRequired();
+      return;
+    }
+
+    const requestKey = 'concept-map';
+    const controller = abortManager.current.createController(requestKey);
+    setConceptMapError(null);
+    setConceptMapGenerationStartTime(Date.now());
+    setIsGeneratingConceptMap(true);
+
+    try {
+      const response = await csrfFetch.post(
+        '/api/concept-map',
+        {
+          videoId,
+          videoInfo,
+          transcript,
+          maxConcepts: 12,
+        },
+        { signal: controller.signal }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          handleAuthRequired();
+          return;
+        }
+
+        throw new Error(buildApiErrorMessage(data, "Failed to generate Concept Map"));
+      }
+
+      setConceptMap(data.analysis ?? null);
+    } catch (error) {
+      const isAbortError =
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name?: string }).name === "AbortError";
+
+      if (!isAbortError) {
+        setConceptMapError(
+          normalizeErrorMessage(
+            error instanceof Error ? error.message : undefined,
+            "Failed to generate Concept Map. Please try again."
+          )
+        );
+      }
+    } finally {
+      abortManager.current.cleanup(requestKey);
+      setConceptMapGenerationStartTime(null);
+      setIsGeneratingConceptMap(false);
+    }
+  }, [
+    videoId,
+    transcript,
+    isGeneratingConceptMap,
+    user,
+    handleAuthRequired,
+    videoInfo,
+  ]);
 
   const requestPlayTopic = useCallback((topic: Topic) => {
     setPlaybackCommand({ type: 'PLAY_TOPIC', topic, autoPlay: true });
@@ -629,6 +705,10 @@ export default function AnalyzePage() {
       setIsLoadingThemeTopics(false);
       setIsGeneratingHighlights(false);
       setHighlightGenerationError(null);
+      setConceptMap(null);
+      setConceptMapError(null);
+      setIsGeneratingConceptMap(false);
+      setConceptMapGenerationStartTime(null);
       setSelectedTopic(null);
       setCurrentTime(0);
       setVideoDuration(0);
@@ -1953,6 +2033,16 @@ export default function AnalyzePage() {
                     />
                   </div>
                 )}
+                <ConceptMapPanel
+                  analysis={conceptMap}
+                  isLoading={isGeneratingConceptMap}
+                  elapsedTime={conceptMapGenerationElapsedTime}
+                  error={conceptMapError}
+                  onGenerate={handleGenerateConceptMap}
+                  onSeek={requestSeek}
+                  isAuthenticated={!!user}
+                  onRequestSignIn={handleAuthRequired}
+                />
                 <HighlightsPanel
                   topics={topics}
                   selectedTopic={selectedTopic}

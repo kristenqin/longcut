@@ -7,6 +7,10 @@ const pageSource = readFileSync(
   join(process.cwd(), 'app/analyze/[videoId]/page.tsx'),
   'utf8'
 );
+const conceptMapPanelSource = readFileSync(
+  join(process.cwd(), 'components/concept-map-panel.tsx'),
+  'utf8'
+);
 
 test('right column height recalculates when transcript workspace becomes visible', () => {
   const effectStart = pageSource.indexOf('// Dynamically adjust right column height');
@@ -42,4 +46,21 @@ test('transcript seeks try the current youtube player before queuing a command',
   const requestSeekSource = pageSource.slice(requestSeekStart, requestSeekStart + 300);
   assert.match(requestSeekSource, /youtubePlayerRef\.current\?\.seekTo\(time\)/);
   assert.match(requestSeekSource, /setPlaybackCommand\(\{ type: 'SEEK', time \}\)/);
+});
+
+test('concept map panel renders before highlight plugin and seeks by evidence timestamp', () => {
+  const conceptPanelIndex = pageSource.indexOf('<ConceptMapPanel');
+  const highlightsPanelIndex = pageSource.indexOf('<HighlightsPanel');
+
+  assert.notEqual(conceptPanelIndex, -1, 'Expected ConceptMapPanel render to exist');
+  assert.notEqual(highlightsPanelIndex, -1, 'Expected HighlightsPanel render to exist');
+  assert.ok(
+    conceptPanelIndex < highlightsPanelIndex,
+    'Concept Map should be presented before legacy highlights'
+  );
+
+  const conceptPanelSource = pageSource.slice(conceptPanelIndex, conceptPanelIndex + 500);
+  assert.match(conceptPanelSource, /onGenerate=\{handleGenerateConceptMap\}/);
+  assert.match(conceptPanelSource, /onSeek=\{requestSeek\}/);
+  assert.match(conceptMapPanelSource, /onSeek\(evidence\.start\)/);
 });
