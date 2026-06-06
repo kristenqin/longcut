@@ -9,7 +9,7 @@ tags: [bilibili, transcript, subtitles, platform-adapter]
 
 ## 结论摘要
 
-B 站 MVP 不建议直接抓视频流做音频转写。更稳妥的路径是：
+B 站 MVP 的第一优先级仍然是平台原生字幕，因为它成本低、带时间戳、可审计。主路径是：
 
 ```txt
 Bilibili URL
@@ -21,7 +21,17 @@ Bilibili URL
   -> 转成 TranscriptSegment[]
 ```
 
-如果没有字幕，MVP 应明确提示「该视频没有可用 transcript」，不做无依据概念图。
+如果没有字幕，MVP 可以进入 ASR fallback：
+
+```txt
+Bilibili URL
+  -> bvid / cid
+  -> playurl DASH audio
+  -> audio ASR
+  -> TranscriptSegment[]
+```
+
+注意：ASR fallback 的产物仍然必须先落成 timestamped transcript，Concept Map 不能直接根据音频或视频画面生成。若原生字幕和 ASR 都不可用，MVP 应明确提示「该视频没有可用 transcript」，不做无依据概念图。
 
 核心判断：
 
@@ -29,6 +39,7 @@ Bilibili URL
 - `cid` 是分 P / 实际视频内容级标识。
 - 字幕跟随 `cid`，不是只跟随 `bvid`。
 - 缓存 transcript 时不能只用视频 URL 或 `bvid`，必须至少绑定 `platform + bvid/aid + cid + page + subtitle_id + language + source_kind`。
+- 无字幕视频若使用 ASR，缓存键还要区分 `source_kind = asr`、ASR provider、model 和音频 track。
 
 ## 播放能力
 
@@ -152,6 +163,37 @@ WBI 签名来源：
 
 - https://socialsisteryi.github.io/bilibili-API-collect/docs/misc/sign/wbi.html
 
+## 无字幕 ASR fallback
+
+当前 MVP 已增加 B 站无字幕 fallback：
+
+```txt
+x/player/v2 subtitle list empty
+  -> x/player/playurl?bvid=...&cid=...&fnval=16
+  -> select lowest-bandwidth DASH audio
+  -> download audio with Bilibili referer headers
+  -> Gemini audio transcription
+  -> createTranscriptResult(..., source = "ai")
+```
+
+配置项：
+
+| 环境变量 | 用途 |
+|---|---|
+| `GEMINI_API_KEY` | Gemini ASR 调用 key；未配置时不尝试 ASR |
+| `BILIBILI_ENABLE_ASR_FALLBACK` | 显式开启或关闭 ASR fallback |
+| `BILIBILI_ASR_PROVIDER` | MVP 只支持 `gemini` |
+| `BILIBILI_ASR_MODEL` | ASR 使用的 Gemini 模型 |
+| `BILIBILI_ASR_MAX_AUDIO_BYTES` | 单次内联音频下载上限 |
+
+验收视频 `BV1DQ7k6JE4P` 当前表现：
+
+- metadata 和 `cid = 38881660827` 可以获取。
+- 公开视频字幕接口返回空或登录需求。
+- `x/player/playurl` 可以返回 DASH audio track。
+- 如果未配置 `GEMINI_API_KEY`，`/api/transcript` 会返回 no-credits 错误，并带 `fallbackStatus = "not_configured"`。
+- 如果配置 Gemini ASR，adapter 会尝试生成 `source = "ai"` 的 timestamped transcript，后续 Concept Map 复用同一主流程。
+
 ## 不匹配风险
 
 用户提到的「部分视频和 Script 不匹配」是 B 站适配的关键风险。MVP 需要显式处理。
@@ -188,7 +230,11 @@ WBI 签名来源：
    - `view` 可能返回 `redirect_url`。
    - 普通 UGC、PGC / Bangumi、影视内容的元数据和字幕链路不完全一样。
 
-8. **互动视频或分支内容**
+8. **ASR 时间戳偏差**
+   - ASR 生成的时间戳可能比平台原生字幕粗。
+   - MVP 可用于 Concept Map 跳转，但必须保留 `source = "ai"` 和 quality warnings，避免和人工字幕混淆。
+
+9. **互动视频或分支内容**
    - 互动视频可能存在多个剧情节点和 cid。
    - MVP 不应按普通单 cid 视频处理。
 
@@ -303,10 +349,11 @@ const BilibiliAdapter: VideoPlatformAdapter = {
 - `x/player/v2` 字幕列表获取。
 - `subtitle_url` / `subtitle_url_v2` JSON 字幕下载。
 - `body[].from/to/content` 到 normalized transcript 的转换。
+- 无原生字幕时，通过 `x/player/playurl` 获取 DASH audio，并用 Gemini ASR 生成 `source = "ai"` 的 transcript。
 - B 站 iframe embed config。
 - 可选 `BILIBILI_COOKIE` 请求头，用于服务端登录态字幕源。
 
-当前未实现 WBI 签名、Cookie 管理 UI、PGC/Bangumi、互动视频、多 P 批量分析和无字幕视频 ASR。遇到需要登录或没有字幕的情况，adapter 返回空 transcript 和 warning，不生成无依据 Concept Map。
+当前未实现 WBI 签名、Cookie 管理 UI、PGC/Bangumi、互动视频和多 P 批量分析。无字幕视频已接入可配置 ASR fallback；如果 ASR 未配置或失败，adapter 返回空 transcript 和 warning，不生成无依据 Concept Map。
 
 更完整的适配动作拆分：
 
@@ -323,7 +370,7 @@ MVP 默认策略：
 - 只分析 URL 指定分 P。
 - URL 未指定 `p` 时默认分析第 1P。
 - 优先使用 B 站原生字幕。
-- 没有字幕时返回 `transcript_status = no_native_subtitle`，由上层决定是否提示用户或后续接 ASR。
+- 没有字幕时尝试 ASR fallback；如果未配置或失败，返回 `transcript_status = no_native_subtitle` 和 `fallbackStatus`。
 - 登录态作为可选能力，不作为 MVP 强依赖。
 - PGC / Bangumi、互动视频、会员 / 充电限制内容暂不承诺覆盖。
 

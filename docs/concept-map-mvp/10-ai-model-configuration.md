@@ -186,3 +186,25 @@ ProviderAdapter.generate(prompt, schema, model options)
 ```
 
 这样后续换成其他模型时，不需要改 Concept Map schema、evidence anchoring 或 UI。
+
+## Bilibili ASR 与 Concept Map AI 的边界
+
+DeepSeek 是 Concept Map 文本分析的首要 provider。B 站无字幕视频的 ASR fallback 不是 Concept Map 分析，它只负责把音频转成 timestamped transcript。
+
+当前 ASR MVP 使用 Gemini，因为项目已经有 `@google/generative-ai` 依赖：
+
+```txt
+GEMINI_API_KEY=...
+BILIBILI_ENABLE_ASR_FALLBACK=true
+BILIBILI_ASR_PROVIDER=gemini
+BILIBILI_ASR_MODEL=gemini-2.5-flash-lite
+```
+
+流程边界：
+
+```txt
+Bilibili audio -> Gemini ASR -> TranscriptSegment[]
+TranscriptSegment[] -> user configured provider, e.g. DeepSeek -> ConceptMapAnalysis
+```
+
+如果用户只配置 DeepSeek 而没有配置 Gemini，YouTube 和有原生字幕的 B 站视频仍可进行 Concept Map 分析；无原生字幕的 B 站视频会停在 transcript 获取阶段，并返回 no-credits 错误。

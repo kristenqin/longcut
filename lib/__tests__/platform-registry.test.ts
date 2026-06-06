@@ -7,6 +7,7 @@ import {
   resolvePlatformAdapter,
   YouTubeAdapter,
 } from '../platform';
+import { setBilibiliAudioTranscriberForTest } from '../platform/bilibili-asr';
 import { extractSupportedVideoId } from '../utils';
 
 function withMockFetch<T>(mockFetch: typeof fetch, run: () => Promise<T>) {
@@ -15,6 +16,32 @@ function withMockFetch<T>(mockFetch: typeof fetch, run: () => Promise<T>) {
 
   return run().finally(() => {
     globalThis.fetch = originalFetch;
+  });
+}
+
+function withEnv<T>(
+  values: Record<string, string | undefined>,
+  run: () => Promise<T>
+) {
+  const originalValues = new Map<string, string | undefined>();
+
+  for (const [key, value] of Object.entries(values)) {
+    originalValues.set(key, process.env[key]);
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  return run().finally(() => {
+    for (const [key, value] of originalValues.entries()) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
   });
 }
 
@@ -161,6 +188,212 @@ test('BilibiliAdapter selects page cid and normalizes subtitle transcript', asyn
 
   assert.ok(requestedUrls.some((url) => url.includes('bvid=BV1xx411c7mD')));
   assert.ok(requestedUrls.some((url) => url.includes('cid=222')));
+});
+
+test('BilibiliAdapter explains no-subtitle videos when ASR is not configured', async () => {
+  await withEnv(
+    {
+      GEMINI_API_KEY: undefined,
+      BILIBILI_ENABLE_ASR_FALLBACK: undefined,
+      BILIBILI_ASR_PROVIDER: undefined,
+    },
+    async () => withMockFetch(
+      async (input) => {
+        const url = String(input);
+
+        if (url.includes('/x/web-interface/view')) {
+          return new Response(
+            JSON.stringify({
+              code: 0,
+              data: {
+                aid: 123,
+                bvid: 'BV1NoSubtitles',
+                cid: 333,
+                title: 'No subtitle test',
+                duration: 60,
+                pages: [{ cid: 333, page: 1, part: 'Part 1', duration: 60 }],
+              },
+            }),
+            { status: 200 }
+          );
+        }
+
+        if (url.includes('/x/player/v2')) {
+          return new Response(
+            JSON.stringify({
+              code: 0,
+              data: {
+                need_login_subtitle: true,
+                subtitle: { subtitles: [] },
+              },
+            }),
+            { status: 200 }
+          );
+        }
+
+        return new Response('{}', { status: 404 });
+      },
+      async () => {
+        const parsed = await BilibiliAdapter.parseUrl(
+          'https://www.bilibili.com/video/BV1NoSubtitles/'
+        );
+        const transcript = await BilibiliAdapter.fetchTranscript(parsed, {
+          expectedDuration: 60,
+        });
+
+        assert.equal(transcript.segments.length, 0);
+        assert.equal(transcript.source, 'unknown');
+        assert.match(
+          transcript.warnings.join('\n'),
+          /Bilibili ASR fallback is not configured/
+        );
+        assert.equal(
+          (transcript.raw as any).asr.status,
+          'not_configured'
+        );
+      }
+    )
+  );
+});
+
+test('BilibiliAdapter falls back to mocked ASR audio transcript when native subtitles are unavailable', async () => {
+  const requestedUrls: string[] = [];
+
+  await withEnv(
+    {
+      GEMINI_API_KEY: 'test-gemini-key',
+      BILIBILI_ENABLE_ASR_FALLBACK: 'true',
+      BILIBILI_ASR_PROVIDER: undefined,
+    },
+    async () => {
+      setBilibiliAudioTranscriberForTest(async (input) => {
+        assert.equal(input.mimeType, 'audio/mp4');
+        assert.deepEqual([...input.audioBytes], [1, 2, 3, 4]);
+        assert.equal(input.expectedDuration, 60);
+
+        return {
+          language: 'zh-CN',
+          segments: [
+            { text: '这是转写后的第一段', start: 0, duration: 4 },
+            { text: '这是转写后的第二段', start: 4, duration: 5 },
+          ],
+          warnings: ['Mock ASR warning'],
+          raw: {
+            model: 'mock-gemini',
+            usage: { totalTokens: 12 },
+          },
+        };
+      });
+
+      try {
+        await withMockFetch(
+          async (input) => {
+            const url = String(input);
+            requestedUrls.push(url);
+
+            if (url.includes('/x/web-interface/view')) {
+              return new Response(
+                JSON.stringify({
+                  code: 0,
+                  data: {
+                    aid: 123,
+                    bvid: 'BV1AudioFallback',
+                    cid: 333,
+                    title: 'Audio fallback test',
+                    duration: 60,
+                    pages: [{ cid: 333, page: 1, part: 'Part 1', duration: 60 }],
+                  },
+                }),
+                { status: 200 }
+              );
+            }
+
+            if (url.includes('/x/player/v2')) {
+              return new Response(
+                JSON.stringify({
+                  code: 0,
+                  data: {
+                    need_login_subtitle: true,
+                    subtitle: { subtitles: [] },
+                  },
+                }),
+                { status: 200 }
+              );
+            }
+
+            if (url.includes('/x/player/playurl')) {
+              return new Response(
+                JSON.stringify({
+                  code: 0,
+                  data: {
+                    dash: {
+                      audio: [
+                        {
+                          id: 30280,
+                          bandwidth: 109338,
+                          codecs: 'mp4a.40.2',
+                          mimeType: 'audio/mp4',
+                          baseUrl: 'https://audio.example/high.m4s',
+                        },
+                        {
+                          id: 30216,
+                          bandwidth: 65685,
+                          codecs: 'mp4a.40.2',
+                          mimeType: 'audio/mp4',
+                          baseUrl: 'https://audio.example/low.m4s',
+                        },
+                      ],
+                    },
+                  },
+                }),
+                { status: 200 }
+              );
+            }
+
+            if (url === 'https://audio.example/low.m4s') {
+              return new Response(new Uint8Array([1, 2, 3, 4]), {
+                status: 200,
+                headers: {
+                  'content-length': '4',
+                  'content-type': 'audio/mp4',
+                },
+              });
+            }
+
+            return new Response('{}', { status: 404 });
+          },
+          async () => {
+            const parsed = await BilibiliAdapter.parseUrl(
+              'https://www.bilibili.com/video/BV1AudioFallback/'
+            );
+            const transcript = await BilibiliAdapter.fetchTranscript(parsed, {
+              expectedDuration: 60,
+            });
+
+            assert.equal(transcript.source, 'ai');
+            assert.equal(transcript.language, 'zh-CN');
+            assert.equal(transcript.segments.length, 2);
+            assert.equal(
+              transcript.segments[0].id,
+              'bilibili-BV1AudioFallback-333-asr-0'
+            );
+            assert.match(
+              transcript.warnings.join('\n'),
+              /Bilibili subtitles require login/
+            );
+            assert.match(transcript.warnings.join('\n'), /Mock ASR warning/);
+            assert.equal((transcript.raw as any).asr.status, 'success');
+            assert.equal((transcript.raw as any).asr.audio.id, 30216);
+          }
+        );
+      } finally {
+        setBilibiliAudioTranscriberForTest(null);
+      }
+    }
+  );
+
+  assert.ok(requestedUrls.some((url) => url.includes('/x/player/playurl')));
+  assert.ok(requestedUrls.includes('https://audio.example/low.m4s'));
 });
 
 test('createTranscriptResult normalizes ids, end times, and quality warnings', () => {

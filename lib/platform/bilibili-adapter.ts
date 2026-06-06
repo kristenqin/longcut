@@ -1,4 +1,5 @@
 import { createTranscriptResult } from './transcript-normalizer';
+import { fetchBilibiliAsrTranscript } from './bilibili-asr';
 import type {
   PlayerEmbedConfig,
   TranscriptOptions,
@@ -349,24 +350,55 @@ export const BilibiliAdapter: VideoPlatformAdapter = {
     const subtitles = subtitleInfo?.subtitles ?? [];
     const selectedSubtitle = selectSubtitle(subtitles, options.preferredLanguage);
 
+    const expectedDuration = options.expectedDuration ?? context.metadata?.duration;
+
     if (!selectedSubtitle) {
-      const warnings = [
+      const nativeWarnings = [
         playerInfo.data?.need_login_subtitle
           ? 'Bilibili subtitles require login for this video.'
           : 'No Bilibili subtitle track is available for this video.',
       ];
+      const asrTranscript = await fetchBilibiliAsrTranscript({
+        aid: context.aid,
+        bvid: context.bvid,
+        cid: context.cid,
+        page: context.page,
+        canonicalUrl: context.canonicalUrl,
+        title: context.metadata?.title,
+        preferredLanguage: options.preferredLanguage,
+        expectedDuration,
+      });
+
+      if (asrTranscript.segments.length > 0) {
+        return createTranscriptResult(asrTranscript.segments, {
+          idPrefix: `bilibili-${context.bvid}-${context.cid}-asr`,
+          language: asrTranscript.language ?? options.preferredLanguage,
+          expectedDuration,
+          source: 'ai',
+          warnings: [...nativeWarnings, ...asrTranscript.warnings],
+          raw: {
+            aid: context.aid,
+            bvid: context.bvid,
+            cid: context.cid,
+            page: context.page,
+            subtitles,
+            ...asrTranscript.raw,
+          },
+        });
+      }
 
       return createTranscriptResult([], {
         idPrefix: `bilibili-${context.bvid}-${context.cid}`,
-        expectedDuration: context.metadata?.duration,
+        expectedDuration,
         source: 'unknown',
-        warnings,
+        warnings: [...nativeWarnings, ...asrTranscript.warnings],
         raw: {
           aid: context.aid,
           bvid: context.bvid,
           cid: context.cid,
           page: context.page,
           subtitles,
+          ...asrTranscript.raw,
         },
       });
     }
@@ -391,7 +423,7 @@ export const BilibiliAdapter: VideoPlatformAdapter = {
       idPrefix: `bilibili-${context.bvid}-${context.cid}-${selectedSubtitle.id ?? selectedSubtitle.lan ?? 'subtitle'}`,
       language: selectedSubtitle.lan,
       availableLanguages,
-      expectedDuration: context.metadata?.duration,
+      expectedDuration,
       source: inferSubtitleSource(selectedSubtitle),
       raw: {
         aid: context.aid,
