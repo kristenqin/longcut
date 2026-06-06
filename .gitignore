@@ -29,9 +29,20 @@
 # supabase
 supabase/.temp/
 
-# documentation (local only)
-docs/
+# documentation
+docs/*
+!docs/superpowers/
+!docs/superpowers/**
+!docs/concept-map-mvp/
+!docs/concept-map-mvp/**
+!docs/doc-pipeline-usage.md
 .worktrees/
+
+# doc pipeline generated output
+dist-docs/
+.doc-pipeline/report.json
+.doc-pipeline/agent-report.json
+.doc-pipeline/tmp/
 
 # test resources (transcripts for testing)
 resources/transcripts/
