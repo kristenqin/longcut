@@ -7,6 +7,9 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint .",
+    "docs:check": "doc-pipeline check",
+    "docs:build": "doc-pipeline build",
+    "docs:dev": "doc-pipeline dev",
     "validate-env": "tsx scripts/validate-env.ts",
     "stripe:smoke": "node scripts/stripe-smoke.mjs",
     "stripe:setup-portal": "tsx scripts/setup-stripe-portal.ts",
@@ -51,6 +54,7 @@
     "sonner": "^2.0.7",
     "stripe": "^19.2.0",
     "tailwind-merge": "^3.3.1",
+    "undici": "^8.4.0",
     "zod": "^4.1.9"
   },
   "devDependencies": {
@@ -59,6 +63,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "doc-pipeline": "0.1.4",
     "eslint": "^9.37.0",
     "eslint-config-next": "^15.5.6",
     "tailwindcss": "^4",
