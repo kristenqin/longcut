@@ -110,17 +110,21 @@ Create `.env.local` in the repo root:
 | --- | --- | --- |
 | `MINIMAX_API_KEY` | yes* | MiniMax API key for text generation when `AI_PROVIDER=minimax` (recommended) |
 | `MINIMAX_API_BASE_URL` | optional | Override the MiniMax API base URL |
+| `DEEPSEEK_API_KEY` | optional | DeepSeek API key for text generation when `AI_PROVIDER=deepseek` |
+| `DEEPSEEK_API_BASE_URL` | optional | Override the DeepSeek API base URL; defaults to `https://api.deepseek.com` |
 | `XAI_API_KEY` | optional | xAI Grok API key for fallback or switching providers |
 | `GEMINI_API_KEY` | yes** | Google Gemini API key for `app/api/generate-image/route.ts`; also usable as a text provider |
 | `NEXT_PUBLIC_SUPABASE_URL` | yes | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | yes | Supabase anonymous key |
 | `CSRF_SALT` | yes | Long random string used to sign CSRF tokens |
-| `AI_PROVIDER` | recommended | `minimax`, `grok`, or `gemini`; determines which server-side text provider adapter is used |
+| `AI_SETTINGS_ENCRYPTION_KEY` | recommended | Server-side secret for encrypting user AI provider API keys; falls back to other server secrets in development |
+| `AI_PROVIDER` | recommended | `deepseek`, `minimax`, `grok`, or `gemini`; determines which server-side text provider adapter is used |
 | `NEXT_PUBLIC_AI_PROVIDER` | recommended | Set this to match `AI_PROVIDER` for consistent client/server provider behavior in Phase 1 |
 | `AI_DEFAULT_MODEL` | recommended | Override provider default model (for Phase 1, `MiniMax-M2.7`) |
 | `NEXT_PUBLIC_AI_MODEL` | optional | Client-side model hint for UI/config display; does not control server routing by itself |
 | `NEXT_PUBLIC_APP_URL` | optional | Canonical app URL (defaults to `http://localhost:3000`) |
 | `NEXT_PUBLIC_ENABLE_TRANSLATION_SELECTOR` | optional | Set to `true` to show the transcript translation dropdown (hidden otherwise) |
+| `YOUTUBE_PROXY_URL` | optional | HTTP proxy used by the server-side YouTube transcript and metadata fetchers, e.g. `http://127.0.0.1:7897` for local proxy tools |
 | `YOUTUBE_API_KEY` | optional | Enables additional metadata when available |
 | `UNLIMITED_VIDEO_USERS` | optional | Comma-separated emails or user IDs allowed to bypass daily limits |
 
@@ -155,6 +159,7 @@ The dev server reaches out to YouTube and your configured AI provider(s) directl
 - Topic generation mode (`smart` vs `fast`) is persisted per-profile and synced via `useModePreference`.
 - `middleware.ts` refreshes Supabase sessions and adds security headers—keep it enabled when deploying to Vercel.
 - Detailed architecture notes, prompts, and database expectations live in `CLAUDE.md`; review it before larger changes.
+- Doc Pipeline documentation rules live in `docs/doc-pipeline-usage.md`; run `doc-pipeline check` after changing docs.
 
 ## Contributing
 
