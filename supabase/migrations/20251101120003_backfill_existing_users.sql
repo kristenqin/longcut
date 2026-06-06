@@ -58,20 +58,22 @@ INSERT INTO video_generations (
   created_at
 )
 SELECT
-  va.user_id,
-  'user:' || va.user_id AS identifier,
+  uv.user_id,
+  'user:' || uv.user_id AS identifier,
   va.youtube_id,
   va.id AS video_id,
   false AS counted_toward_limit, -- Historical videos don't count toward current limits
   COALESCE(p.subscription_tier, 'free') AS subscription_tier,
-  va.created_at
-FROM video_analyses va
-LEFT JOIN profiles p ON va.user_id = p.id
-WHERE va.user_id IS NOT NULL
+  COALESCE(uv.accessed_at, va.created_at) AS created_at
+FROM user_videos uv
+JOIN video_analyses va ON va.id = uv.video_id
+LEFT JOIN profiles p ON uv.user_id = p.id
+WHERE uv.user_id IS NOT NULL
   AND NOT EXISTS (
     -- Avoid duplicates if migration is run multiple times
     SELECT 1 FROM video_generations vg
     WHERE vg.video_id = va.id
+      AND vg.user_id = uv.user_id
   )
 ON CONFLICT (id) DO NOTHING;
 
@@ -93,7 +95,7 @@ WHERE subscription_tier = 'free'
 -- Query 3: Verify video_generations backfill count
 -- Expected: Count should match or be close to video_analyses count
 SELECT
-  (SELECT COUNT(*) FROM video_analyses WHERE user_id IS NOT NULL) AS video_analyses_count,
+  (SELECT COUNT(*) FROM user_videos uv JOIN video_analyses va ON va.id = uv.video_id) AS video_user_links_count,
   (SELECT COUNT(*) FROM video_generations WHERE counted_toward_limit = false) AS historical_generations_count;
 
 -- Query 4: Check for users with negative or null topup_credits

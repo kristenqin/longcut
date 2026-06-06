@@ -271,19 +271,31 @@ $$;
 -- SECTION 5: CRON JOBS
 -- ============================================================================
 
--- Schedule email processing every minute
-SELECT cron.schedule(
-    'process-welcome-emails',
-    '* * * * *',  -- Every minute
-    $$SELECT public.process_welcome_emails();$$
-);
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'cron') THEN
+        -- Schedule email processing every minute
+        EXECUTE $schedule$
+            SELECT cron.schedule(
+                'process-welcome-emails',
+                '* * * * *',
+                $job$SELECT public.process_welcome_emails();$job$
+            );
+        $schedule$;
 
--- Schedule response handling every minute
-SELECT cron.schedule(
-    'handle-welcome-email-responses',
-    '* * * * *',  -- Every minute
-    $$SELECT public.handle_welcome_email_responses();$$
-);
+        -- Schedule response handling every minute
+        EXECUTE $schedule$
+            SELECT cron.schedule(
+                'handle-welcome-email-responses',
+                '* * * * *',
+                $job$SELECT public.handle_welcome_email_responses();$job$
+            );
+        $schedule$;
+    ELSE
+        RAISE NOTICE 'Skipping welcome email cron schedules because schema cron is not available.';
+    END IF;
+END
+$$;
 
 -- ============================================================================
 -- SECTION 6: ROW LEVEL SECURITY
@@ -319,12 +331,22 @@ BEGIN
 END;
 $$;
 
--- Schedule cleanup weekly (Sunday at 3 AM UTC)
-SELECT cron.schedule(
-    'cleanup-welcome-emails',
-    '0 3 * * 0',  -- Every Sunday at 3 AM UTC
-    $$SELECT public.cleanup_old_welcome_emails();$$
-);
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'cron') THEN
+        -- Schedule cleanup weekly (Sunday at 3 AM UTC)
+        EXECUTE $schedule$
+            SELECT cron.schedule(
+                'cleanup-welcome-emails',
+                '0 3 * * 0',
+                $job$SELECT public.cleanup_old_welcome_emails();$job$
+            );
+        $schedule$;
+    ELSE
+        RAISE NOTICE 'Skipping welcome email cleanup cron schedule because schema cron is not available.';
+    END IF;
+END
+$$;
 
 -- ============================================================================
 -- MIGRATION COMPLETE
