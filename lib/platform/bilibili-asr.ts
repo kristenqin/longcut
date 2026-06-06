@@ -19,6 +19,8 @@ type AsrFallbackStatus =
   | 'audio_too_large'
   | 'failed';
 
+type AsrProvider = 'gemini' | 'mock';
+
 interface BilibiliDashAudio {
   id?: number;
   bandwidth?: number;
@@ -71,7 +73,7 @@ export interface BilibiliAsrTranscriptResult {
   raw: {
     asr: {
       status: AsrFallbackStatus;
-      provider: 'gemini';
+      provider: AsrProvider;
       model?: string;
       audio?: {
         id?: number;
@@ -141,16 +143,16 @@ function hasUsableGeminiKey(): boolean {
 
 function getAsrConfig():
   | {
-      enabled: true;
-      provider: 'gemini';
+    enabled: true;
+      provider: AsrProvider;
       model: string;
       maxAudioBytes: number;
       timeoutMs: number;
       maxOutputTokens: number;
     }
   | {
-      enabled: false;
-      provider: 'gemini';
+    enabled: false;
+      provider: AsrProvider;
       status: 'disabled' | 'not_configured';
       reason: string;
     } {
@@ -164,9 +166,33 @@ function getAsrConfig():
   if (enabledOverride === false) {
     return {
       enabled: false,
-      provider: 'gemini',
+      provider: provider === 'mock' ? 'mock' : 'gemini',
       status: 'disabled',
       reason: 'Bilibili ASR fallback is disabled by BILIBILI_ENABLE_ASR_FALLBACK=false.',
+    };
+  }
+
+  if (provider === 'mock') {
+    if (parseBooleanEnv(process.env.BILIBILI_ENABLE_MOCK_ASR) !== true) {
+      return {
+        enabled: false,
+        provider: 'mock',
+        status: 'disabled',
+        reason:
+          'Mock Bilibili ASR is disabled. Set BILIBILI_ENABLE_MOCK_ASR=true for local end-to-end validation only.',
+      };
+    }
+
+    return {
+      enabled: true,
+      provider: 'mock',
+      model: 'mock-bilibili-asr',
+      maxAudioBytes: parsePositiveInteger(
+        process.env.BILIBILI_ASR_MAX_AUDIO_BYTES,
+        DEFAULT_MAX_AUDIO_BYTES
+      ),
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
     };
   }
 
@@ -516,6 +542,52 @@ async function transcribeAudioWithGemini(
   };
 }
 
+function transcribeAudioWithMock(input: AudioTranscriberInput): AudioTranscriptionResult {
+  const expectedDuration =
+    input.expectedDuration && input.expectedDuration > 0
+      ? input.expectedDuration
+      : 360;
+  const segmentCount = 8;
+  const segmentDuration = Math.max(8, Math.floor(expectedDuration / segmentCount));
+  const title = input.title || 'Bilibili video';
+  const texts = [
+    `Mock ASR transcript for local MVP validation. The video title is "${title}".`,
+    'This mock segment stands in for the opening context and problem statement.',
+    'This mock segment represents the first core concept that the Concept Map should identify.',
+    'This mock segment represents a supporting mechanism or causal explanation.',
+    'This mock segment represents an example that can be used as timestamped evidence.',
+    'This mock segment represents a tradeoff or counterpoint in the argument.',
+    'This mock segment represents how the concepts connect into a reusable map.',
+    'This mock segment represents the conclusion and lets click-to-video seeking be verified.',
+  ];
+
+  return {
+    language: input.preferredLanguage || 'zh-CN',
+    segments: texts.map((text, index) => {
+      const start = Math.min(index * segmentDuration, Math.max(0, expectedDuration - 1));
+      const nextStart =
+        index === texts.length - 1
+          ? expectedDuration
+          : Math.min((index + 1) * segmentDuration, expectedDuration);
+
+      return {
+        text,
+        start,
+        duration: Math.max(1, nextStart - start),
+      };
+    }),
+    warnings: [
+      'Mock Bilibili ASR transcript was used for local MVP validation. Do not treat this as video-grounded content.',
+    ],
+    raw: {
+      model: 'mock-bilibili-asr',
+      usage: {
+        audioBytes: input.audioBytes.byteLength,
+      },
+    },
+  };
+}
+
 export function setBilibiliAudioTranscriberForTest(
   transcriber: AudioTranscriber | null
 ) {
@@ -534,7 +606,7 @@ export async function fetchBilibiliAsrTranscript(
       raw: {
         asr: {
           status: config.status,
-          provider: 'gemini',
+          provider: config.provider,
           error: config.reason,
         },
       },
@@ -553,7 +625,7 @@ export async function fetchBilibiliAsrTranscript(
         raw: {
           asr: {
             status: 'no_audio',
-            provider: 'gemini',
+            provider: config.provider,
             model: config.model,
             error: 'No Bilibili DASH audio track is available.',
           },
@@ -578,8 +650,10 @@ export async function fetchBilibiliAsrTranscript(
     );
     const transcriber = transcriberForTest
       ? transcriberForTest
-      : (transcriberInput: AudioTranscriberInput) =>
-          transcribeAudioWithGemini(transcriberInput, config);
+      : config.provider === 'mock'
+        ? transcribeAudioWithMock
+        : (transcriberInput: AudioTranscriberInput) =>
+            transcribeAudioWithGemini(transcriberInput, config);
     const transcript = await transcriber({
       audioBytes,
       mimeType,
@@ -595,7 +669,7 @@ export async function fetchBilibiliAsrTranscript(
       raw: {
         asr: {
           status: 'success',
-          provider: 'gemini',
+          provider: config.provider,
           model:
             typeof transcript.raw === 'object' && transcript.raw
               ? String((transcript.raw as Record<string, unknown>).model ?? config.model)
@@ -625,7 +699,7 @@ export async function fetchBilibiliAsrTranscript(
       raw: {
         asr: {
           status,
-          provider: 'gemini',
+          provider: config.provider,
           model: config.model,
           error: message,
         },

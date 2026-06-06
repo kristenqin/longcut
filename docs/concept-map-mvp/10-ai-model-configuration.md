@@ -200,6 +200,15 @@ BILIBILI_ASR_PROVIDER=gemini
 BILIBILI_ASR_MODEL=gemini-2.5-flash-lite
 ```
 
+本地 smoke 可临时使用：
+
+```txt
+BILIBILI_ASR_PROVIDER=mock
+BILIBILI_ENABLE_MOCK_ASR=true
+```
+
+mock ASR 只用于验证 B 站 URL、metadata、audio source、transcript UI、Concept Map API 和播放器跳转的完整链路，不代表真实视频内容。
+
 流程边界：
 
 ```txt

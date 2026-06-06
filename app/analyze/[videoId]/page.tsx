@@ -33,6 +33,11 @@ type CachedHighlightPayload = {
   themes?: string[];
   topicCandidates?: TopicCandidate[];
 };
+type TranscriptMeta = {
+  language?: string;
+  availableLanguages?: string[];
+  source?: TranscriptSource;
+};
 import { buildVideoSlug, extractSupportedVideoId } from "@/lib/utils";
 import { getLanguageName } from "@/lib/language-utils";
 import { NO_CREDITS_USED_MESSAGE } from "@/lib/no-credits-message";
@@ -49,7 +54,7 @@ import { toast } from "sonner";
 import { hasSpeakerMetadata } from "@/lib/transcript-export";
 import { buildSuggestedQuestionFallbacks } from "@/lib/suggested-question-fallback";
 import type { ConceptMapAnalysis } from "@/lib/concept-map";
-import type { VideoRef } from "@/lib/platform";
+import type { TranscriptSource, VideoRef } from "@/lib/platform";
 
 const GUEST_LIMIT_MESSAGE = "You've used your free preview. Create a free account for 3 videos/month.";
 const AUTH_LIMIT_MESSAGE = "You've used all 3 free videos this month. Upgrade to Pro for 100 videos/month.";
@@ -226,6 +231,7 @@ export default function AnalyzePage() {
   const [currentVideoRef, setCurrentVideoRef] = useState<VideoRef | null>(null);
   const [videoPreview, setVideoPreview] = useState<string>("");
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
+  const [transcriptMeta, setTranscriptMeta] = useState<TranscriptMeta | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [baseTopics, setBaseTopics] = useState<Topic[]>([]);
   const [themes, setThemes] = useState<string[]>([]);
@@ -465,6 +471,7 @@ export default function AnalyzePage() {
           ...(currentVideoRef ? { videoRef: currentVideoRef } : { videoId }),
           videoInfo,
           transcript,
+          transcriptMeta: transcriptMeta ?? undefined,
           maxConcepts: 6,
         },
         { signal: controller.signal }
@@ -503,6 +510,7 @@ export default function AnalyzePage() {
     isGeneratingConceptMap,
     videoInfo,
     currentVideoRef,
+    transcriptMeta,
   ]);
 
   const requestPlayTopic = useCallback((topic: Topic) => {
@@ -714,6 +722,7 @@ export default function AnalyzePage() {
       setBaseTopics([]);
       cachedHighlightPayloadRef.current = null;
       setTranscript([]);
+      setTranscriptMeta(null);
       setThemes([]);
       setSelectedTheme(null);
       setThemeTopicsMap({});
@@ -786,6 +795,11 @@ export default function AnalyzePage() {
 
               // Load all cached data
               setTranscript(sanitizedTranscript);
+              setTranscriptMeta({
+                language: cacheData.videoInfo?.language,
+                availableLanguages: cacheData.videoInfo?.availableLanguages,
+                source: 'unknown',
+              });
               cachedHighlightPayloadRef.current =
                 Array.isArray(cacheData.topics) && cacheData.topics.length > 0
                   ? {
@@ -984,6 +998,7 @@ export default function AnalyzePage() {
       let availableLanguages: string[] | undefined;
       let transcriptDuration: number | undefined;
       let transcriptIsPartial: boolean | undefined;
+      let transcriptSource: TranscriptSource | undefined;
       try {
         const data = await transcriptRes.json();
         fetchedTranscript = data.transcript;
@@ -991,6 +1006,13 @@ export default function AnalyzePage() {
         availableLanguages = data.availableLanguages;
         transcriptDuration = data.transcriptDuration;
         transcriptIsPartial = data.isPartial;
+        transcriptSource =
+          data.source === 'manual' ||
+          data.source === 'auto' ||
+          data.source === 'ai' ||
+          data.source === 'unknown'
+            ? data.source
+            : undefined;
         if (data.videoRef) {
           setCurrentVideoRef(data.videoRef);
         }
@@ -1014,6 +1036,11 @@ export default function AnalyzePage() {
 
       const normalizedTranscriptData = normalizeTranscript(fetchedTranscript);
       setTranscript(normalizedTranscriptData);
+      setTranscriptMeta({
+        language,
+        availableLanguages,
+        source: transcriptSource ?? 'unknown',
+      });
 
       // Process video info response (optional)
       let fetchedVideoInfo: VideoInfo | null = null;

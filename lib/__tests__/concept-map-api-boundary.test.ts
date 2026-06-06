@@ -18,6 +18,14 @@ test('Concept Map API uses optional user AI settings and the Concept Map analyze
   assert.doesNotMatch(routeSource, /@\/lib\/ai-processing/);
 });
 
+test('Concept Map API preserves transcript source metadata when provided', () => {
+  const routeSource = readProjectFile('app/api/concept-map/route.ts');
+
+  assert.match(routeSource, /transcriptMetaSchema/);
+  assert.match(routeSource, /transcriptMeta:\s*transcriptMetaSchema\.optional\(\)/);
+  assert.match(routeSource, /source:\s*parsedBody\.transcriptMeta\?\.source \?\? 'unknown'/);
+});
+
 test('Concept Map API is available to the MVP without requiring authentication', () => {
   const routeSource = readProjectFile('app/api/concept-map/route.ts');
 

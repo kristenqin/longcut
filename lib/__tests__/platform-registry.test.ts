@@ -396,6 +396,113 @@ test('BilibiliAdapter falls back to mocked ASR audio transcript when native subt
   assert.ok(requestedUrls.includes('https://audio.example/low.m4s'));
 });
 
+test('BilibiliAdapter supports explicit local mock ASR provider for MVP smoke validation', async () => {
+  const requestedUrls: string[] = [];
+
+  await withEnv(
+    {
+      GEMINI_API_KEY: undefined,
+      BILIBILI_ENABLE_ASR_FALLBACK: undefined,
+      BILIBILI_ASR_PROVIDER: 'mock',
+      BILIBILI_ENABLE_MOCK_ASR: 'true',
+    },
+    async () => withMockFetch(
+      async (input) => {
+        const url = String(input);
+        requestedUrls.push(url);
+
+        if (url.includes('/x/web-interface/view')) {
+          return new Response(
+            JSON.stringify({
+              code: 0,
+              data: {
+                aid: 123,
+                bvid: 'BV1MockAsr',
+                cid: 333,
+                title: 'Mock ASR validation',
+                duration: 80,
+                pages: [{ cid: 333, page: 1, part: 'Part 1', duration: 80 }],
+              },
+            }),
+            { status: 200 }
+          );
+        }
+
+        if (url.includes('/x/player/v2')) {
+          return new Response(
+            JSON.stringify({
+              code: 0,
+              data: {
+                need_login_subtitle: true,
+                subtitle: { subtitles: [] },
+              },
+            }),
+            { status: 200 }
+          );
+        }
+
+        if (url.includes('/x/player/playurl')) {
+          return new Response(
+            JSON.stringify({
+              code: 0,
+              data: {
+                dash: {
+                  audio: [
+                    {
+                      id: 30216,
+                      bandwidth: 65685,
+                      codecs: 'mp4a.40.2',
+                      mimeType: 'audio/mp4',
+                      baseUrl: 'https://audio.example/mock.m4s',
+                    },
+                  ],
+                },
+              },
+            }),
+            { status: 200 }
+          );
+        }
+
+        if (url === 'https://audio.example/mock.m4s') {
+          return new Response(new Uint8Array([1, 2, 3]), {
+            status: 200,
+            headers: {
+              'content-length': '3',
+              'content-type': 'audio/mp4',
+            },
+          });
+        }
+
+        return new Response('{}', { status: 404 });
+      },
+      async () => {
+        const parsed = await BilibiliAdapter.parseUrl(
+          'https://www.bilibili.com/video/BV1MockAsr/'
+        );
+        const transcript = await BilibiliAdapter.fetchTranscript(parsed, {
+          expectedDuration: 80,
+        });
+
+        assert.equal(transcript.source, 'ai');
+        assert.equal(transcript.segments.length, 8);
+        assert.match(
+          transcript.segments[0].text,
+          /Mock ASR transcript for local MVP validation/
+        );
+        assert.match(
+          transcript.warnings.join('\n'),
+          /Mock Bilibili ASR transcript was used/
+        );
+        assert.equal((transcript.raw as any).asr.provider, 'mock');
+        assert.equal((transcript.raw as any).asr.status, 'success');
+      }
+    )
+  );
+
+  assert.ok(requestedUrls.some((url) => url.includes('/x/player/playurl')));
+  assert.ok(requestedUrls.includes('https://audio.example/mock.m4s'));
+});
+
 test('createTranscriptResult normalizes ids, end times, and quality warnings', () => {
   const result = createTranscriptResult(
     [

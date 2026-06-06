@@ -185,6 +185,7 @@ x/player/v2 subtitle list empty
 | `BILIBILI_ASR_PROVIDER` | MVP 只支持 `gemini` |
 | `BILIBILI_ASR_MODEL` | ASR 使用的 Gemini 模型 |
 | `BILIBILI_ASR_MAX_AUDIO_BYTES` | 单次内联音频下载上限 |
+| `BILIBILI_ENABLE_MOCK_ASR` | 仅本地 smoke：配合 `BILIBILI_ASR_PROVIDER=mock` 生成模拟 transcript |
 
 验收视频 `BV1DQ7k6JE4P` 当前表现：
 
@@ -193,6 +194,7 @@ x/player/v2 subtitle list empty
 - `x/player/playurl` 可以返回 DASH audio track。
 - 如果未配置 `GEMINI_API_KEY`，`/api/transcript` 会返回 no-credits 错误，并带 `fallbackStatus = "not_configured"`。
 - 如果配置 Gemini ASR，adapter 会尝试生成 `source = "ai"` 的 timestamped transcript，后续 Concept Map 复用同一主流程。
+- 如果只需要本地验收页面和 Concept Map 交互闭环，可以临时设置 `BILIBILI_ASR_PROVIDER=mock` 和 `BILIBILI_ENABLE_MOCK_ASR=true`。该 transcript 会带 warning，不能当作真实视频内容。
 
 ## 不匹配风险
 

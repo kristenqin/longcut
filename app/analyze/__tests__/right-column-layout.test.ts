@@ -87,6 +87,15 @@ test('concept map generation uses platform videoRef when available', () => {
   assert.match(requestSource, /currentVideoRef \? \{ videoRef: currentVideoRef \} : \{ videoId \}/);
 });
 
+test('concept map generation forwards transcript metadata for platform transcript sources', () => {
+  const requestStart = pageSource.indexOf("csrfFetch.post(\n        '/api/concept-map'");
+  assert.notEqual(requestStart, -1, 'Expected Concept Map API request to exist');
+
+  const requestSource = pageSource.slice(requestStart, requestStart + 700);
+  assert.match(requestSource, /transcriptMeta:\s*transcriptMeta \?\? undefined/);
+  assert.match(pageSource, /setTranscriptMeta\(\{\s*language,\s*availableLanguages,\s*source: transcriptSource \?\? 'unknown'/);
+});
+
 test('analyze page can render Bilibili iframe player for Bilibili refs', () => {
   assert.match(pageSource, /import \{ BilibiliPlayer \}/);
   assert.match(pageSource, /buildDefaultVideoUrl/);

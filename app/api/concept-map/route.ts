@@ -24,11 +24,18 @@ const videoRefSchema = z.object({
   platformPartId: z.string().max(200).nullable().optional(),
 });
 
+const transcriptMetaSchema = z.object({
+  language: z.string().min(2).max(20).optional(),
+  availableLanguages: z.array(z.string().min(2).max(20)).optional(),
+  source: z.enum(['manual', 'auto', 'ai', 'unknown']).optional(),
+});
+
 const conceptMapRequestSchema = z.object({
   videoId: youtubeIdSchema.optional(),
   videoRef: videoRefSchema.optional(),
   videoInfo: videoInfoSchema.partial().optional(),
   transcript: transcriptSchema,
+  transcriptMeta: transcriptMetaSchema.optional(),
   maxConcepts: z.number().int().min(4).max(24).optional(),
 });
 
@@ -100,10 +107,12 @@ async function handler(req: NextRequest) {
     : null;
   const transcript = createTranscriptResult(parsedBody.transcript, {
     idPrefix: `${videoRef.platform}-${videoRef.platformVideoId}`,
-    language: parsedBody.videoInfo?.language,
-    availableLanguages: parsedBody.videoInfo?.availableLanguages,
+    language: parsedBody.transcriptMeta?.language ?? parsedBody.videoInfo?.language,
+    availableLanguages:
+      parsedBody.transcriptMeta?.availableLanguages ??
+      parsedBody.videoInfo?.availableLanguages,
     expectedDuration: parsedBody.videoInfo?.duration,
-    source: 'unknown',
+    source: parsedBody.transcriptMeta?.source ?? 'unknown',
   });
 
   let analysis;
