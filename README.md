@@ -132,6 +132,7 @@ Create `.env.local` in the repo root:
 | `NEXT_PUBLIC_ENABLE_TAKEAWAYS_PLUGIN` | optional | Set to `true` to run takeaways generation as an optional plugin |
 | `YOUTUBE_PROXY_URL` | optional | HTTP proxy used by the server-side YouTube transcript and metadata fetchers, e.g. `http://127.0.0.1:7897` for local proxy tools |
 | `YOUTUBE_API_KEY` | optional | Enables additional metadata when available |
+| `BILIBILI_COOKIE` | optional | Bilibili Cookie header for server-side requests when a video's subtitle data requires login; leave empty for public metadata/subtitles |
 | `UNLIMITED_VIDEO_USERS` | optional | Comma-separated emails or user IDs allowed to bypass daily limits |
 
 <sup>\*</sup> For the Phase 1 rollout, set `AI_PROVIDER=minimax`, `NEXT_PUBLIC_AI_PROVIDER=minimax`, and provide `MINIMAX_API_KEY` for text generation. `XAI_API_KEY` is optional if you want Grok available as a fallback or alternate provider.

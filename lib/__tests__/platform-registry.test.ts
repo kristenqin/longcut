@@ -7,6 +7,7 @@ import {
   resolvePlatformAdapter,
   YouTubeAdapter,
 } from '../platform';
+import { extractSupportedVideoId } from '../utils';
 
 function withMockFetch<T>(mockFetch: typeof fetch, run: () => Promise<T>) {
   const originalFetch = globalThis.fetch;
@@ -28,6 +29,17 @@ test('platform registry resolves Bilibili URLs to BilibiliAdapter', () => {
   assert.equal(
     resolvePlatformAdapter('https://www.bilibili.com/video/BV1xx411c7mD/?p=2'),
     BilibiliAdapter
+  );
+});
+
+test('client-safe URL detection accepts Bilibili and YouTube URLs', () => {
+  assert.deepEqual(
+    extractSupportedVideoId('https://www.bilibili.com/video/BV1DQ7k6JE4P/?spm_id_from=333.1007'),
+    { platform: 'bilibili', videoId: 'BV1DQ7k6JE4P' }
+  );
+  assert.deepEqual(
+    extractSupportedVideoId('https://www.youtube.com/watch?v=abc123xyz89'),
+    { platform: 'youtube', videoId: 'abc123xyz89' }
   );
 });
 

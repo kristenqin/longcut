@@ -63,12 +63,18 @@ const BVID_PATTERN = /^BV[a-zA-Z0-9]+$/;
 const AV_PATTERN = /^av(\d+)$/i;
 
 function requestHeaders(referer?: string): HeadersInit {
-  return {
+  const headers: HeadersInit = {
     Accept: 'application/json, text/plain, */*',
     Referer: referer ?? 'https://www.bilibili.com/',
     'User-Agent':
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
   };
+
+  if (process.env.BILIBILI_COOKIE) {
+    headers.Cookie = process.env.BILIBILI_COOKIE;
+  }
+
+  return headers;
 }
 
 async function fetchBilibiliJson<T>(url: string, referer?: string): Promise<T> {
@@ -325,8 +331,8 @@ export const BilibiliAdapter: VideoPlatformAdapter = {
       code: number;
       message?: string;
       data?: {
+        need_login_subtitle?: boolean;
         subtitle?: {
-          need_login_subtitle?: boolean;
           subtitles?: BilibiliSubtitleItem[];
         };
       };
@@ -345,7 +351,7 @@ export const BilibiliAdapter: VideoPlatformAdapter = {
 
     if (!selectedSubtitle) {
       const warnings = [
-        subtitleInfo?.need_login_subtitle
+        playerInfo.data?.need_login_subtitle
           ? 'Bilibili subtitles require login for this video.'
           : 'No Bilibili subtitle track is available for this video.',
       ];

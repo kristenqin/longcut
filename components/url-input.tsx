@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Loader2, ArrowUp, Link, Sparkles } from "lucide-react";
-import { extractVideoId } from "@/lib/utils";
+import { extractSupportedVideoId } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -46,8 +46,8 @@ export function UrlInput({
       return;
     }
 
-    const videoId = extractVideoId(url);
-    setIsValidUrl(!!videoId);
+    const video = extractSupportedVideoId(url);
+    setIsValidUrl(!!video);
   }, [url]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -55,13 +55,13 @@ export function UrlInput({
     setError("");
 
     if (!url.trim()) {
-      setError("Please enter a YouTube URL");
+      setError("Please enter a YouTube or Bilibili URL");
       return;
     }
 
-    const videoId = extractVideoId(url);
-    if (!videoId) {
-      setError("Please enter a valid YouTube URL");
+    const video = extractSupportedVideoId(url);
+    if (!video) {
+      setError("Please enter a valid YouTube or Bilibili URL");
       return;
     }
 
@@ -89,8 +89,8 @@ export function UrlInput({
               onChange={(e) => setUrl(e.target.value)}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
-              placeholder="Paste Youtube URL link here..."
-              aria-label="YouTube URL"
+              placeholder="Paste YouTube or Bilibili URL here..."
+              aria-label="Video URL"
               aria-invalid={!!error}
               aria-describedby={error ? "url-error" : undefined}
               className="flex-1 border-0 bg-transparent text-[14px] text-[#989999] placeholder:text-[#989999] focus:outline-none"

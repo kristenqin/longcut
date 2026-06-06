@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { UrlInput } from "@/components/url-input";
 import { Card } from "@/components/ui/card";
-import { extractVideoId } from "@/lib/utils";
+import { extractSupportedVideoId } from "@/lib/utils";
 import { toast } from "sonner";
 import { AuthModal } from "@/components/auth-modal";
 import { useModePreference } from "@/lib/hooks/use-mode-preference";
@@ -133,16 +133,16 @@ function HomeContent() {
 
   const handleSubmit = useCallback(
     (url: string) => {
-      const videoId = extractVideoId(url);
-      if (!videoId) {
-        toast.error("Please enter a valid YouTube URL");
+      const video = extractSupportedVideoId(url);
+      if (!video) {
+        toast.error("Please enter a valid YouTube or Bilibili URL");
         return;
       }
 
       const params = new URLSearchParams();
       params.set("url", url);
 
-      router.push(`/analyze/${videoId}?${params.toString()}`);
+      router.push(`/analyze/${video.videoId}?${params.toString()}`);
     },
     [router]
   );

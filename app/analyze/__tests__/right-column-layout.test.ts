@@ -79,6 +79,21 @@ test('concept map generation keeps MVP output size stable', () => {
   assert.match(requestSource, /maxConcepts:\s*6/);
 });
 
+test('concept map generation uses platform videoRef when available', () => {
+  const requestStart = pageSource.indexOf("csrfFetch.post(\n        '/api/concept-map'");
+  assert.notEqual(requestStart, -1, 'Expected Concept Map API request to exist');
+
+  const requestSource = pageSource.slice(requestStart, requestStart + 500);
+  assert.match(requestSource, /currentVideoRef \? \{ videoRef: currentVideoRef \} : \{ videoId \}/);
+});
+
+test('analyze page can render Bilibili iframe player for Bilibili refs', () => {
+  assert.match(pageSource, /import \{ BilibiliPlayer \}/);
+  assert.match(pageSource, /buildDefaultVideoUrl/);
+  assert.match(pageSource, /currentVideoRef\?\.platform === 'bilibili'/);
+  assert.match(pageSource, /<BilibiliPlayer/);
+});
+
 test('optional analysis plugins are gated behind client feature flags', () => {
   assert.match(pageSource, /NEXT_PUBLIC_ENABLE_HIGHLIGHT_REELS/);
   assert.match(pageSource, /NEXT_PUBLIC_ENABLE_CHAT_PLUGIN/);

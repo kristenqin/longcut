@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { extractVideoId } from '@/lib/utils';
 import { withSecurity, SECURITY_PRESETS } from '@/lib/security-middleware';
 import { shouldUseMockData, getMockTranscript } from '@/lib/mock-data';
 import { mergeTranscriptSegmentsIntoSentences } from '@/lib/transcript-sentence-merger';
 import { NO_CREDITS_USED_MESSAGE } from '@/lib/no-credits-message';
+import { resolvePlatformAdapter, type TranscriptResult, type VideoMetadata, type VideoRef } from '@/lib/platform';
 import {
   fetchYouTubeTranscript,
   TranscriptProviderError,
   type TranscriptErrorCode,
 } from '@/lib/youtube-transcript-provider';
+
+type RawTranscriptSegment = { text: string; start: number; duration: number };
 
 function respondWithNoCredits(
   payload: Record<string, unknown>,
@@ -29,6 +31,88 @@ function calculateTranscriptDuration(segments: { start: number; duration: number
   if (segments.length === 0) return 0;
   const lastSegment = segments[segments.length - 1];
   return lastSegment.start + lastSegment.duration;
+}
+
+function serializeVideoRef(ref: VideoRef) {
+  return {
+    platform: ref.platform,
+    canonicalUrl: ref.canonicalUrl,
+    platformVideoId: ref.platformVideoId,
+    platformPartId: ref.platformPartId ?? null,
+    raw: ref.raw,
+  };
+}
+
+function serializeVideoInfo(metadata: VideoMetadata) {
+  return {
+    videoId: metadata.platformVideoId,
+    platform: metadata.platform,
+    title: metadata.title,
+    author: metadata.author ?? 'Unknown',
+    thumbnail: metadata.thumbnail ?? '',
+    duration: metadata.duration ?? 0,
+    description: metadata.description,
+    tags: metadata.tags,
+    language: metadata.language,
+    availableLanguages: metadata.availableLanguages,
+    videoRef: serializeVideoRef({
+      platform: metadata.platform,
+      canonicalUrl: metadata.canonicalUrl,
+      platformVideoId: metadata.platformVideoId,
+      platformPartId: metadata.platformPartId ?? null,
+    }),
+  };
+}
+
+function buildTranscriptResponse(input: {
+  videoId: string;
+  platform: string;
+  videoRef?: VideoRef;
+  rawSegments: RawTranscriptSegment[];
+  language?: string;
+  availableLanguages?: string[];
+  expectedDuration?: number | null;
+  source?: string;
+  warnings?: string[];
+  videoInfo?: ReturnType<typeof serializeVideoInfo>;
+}) {
+  const mergedSentences = mergeTranscriptSegmentsIntoSentences(input.rawSegments);
+  const transformedTranscript = mergedSentences.map((sentence) => ({
+    text: sentence.text,
+    start: sentence.segments[0].start,
+    duration: sentence.segments.reduce((sum, seg) => sum + seg.duration, 0)
+  }));
+
+  const transcriptDuration = calculateTranscriptDuration(input.rawSegments);
+  const coverageRatio = input.expectedDuration ? transcriptDuration / input.expectedDuration : null;
+  const isPartial = input.expectedDuration
+    ? transcriptDuration < input.expectedDuration * 0.5
+    : false;
+
+  return {
+    videoId: input.videoId,
+    platform: input.platform,
+    videoRef: input.videoRef ? serializeVideoRef(input.videoRef) : undefined,
+    videoInfo: input.videoInfo,
+    transcript: transformedTranscript,
+    language: input.language,
+    availableLanguages: input.availableLanguages,
+    source: input.source,
+    warnings: input.warnings,
+    transcriptDuration: Math.round(transcriptDuration),
+    segmentCount: transformedTranscript.length,
+    rawSegmentCount: input.rawSegments.length,
+    isPartial,
+    coverageRatio: coverageRatio ? Math.round(coverageRatio * 100) : undefined,
+  };
+}
+
+function rawSegmentsFromTranscriptResult(result: TranscriptResult): RawTranscriptSegment[] {
+  return result.segments.map((segment) => ({
+    text: segment.text,
+    start: segment.start,
+    duration: segment.duration,
+  }));
 }
 
 function youtubeFailureStatus(code: TranscriptErrorCode): number {
@@ -90,14 +174,16 @@ async function handler(request: NextRequest) {
     const { url, lang, expectedDuration } = await request.json();
 
     if (!url) {
-      return respondWithNoCredits({ error: 'YouTube URL is required' }, 400);
+      return respondWithNoCredits({ error: 'Video URL is required' }, 400);
     }
 
-    const videoId = extractVideoId(url);
-
-    if (!videoId) {
-      return respondWithNoCredits({ error: 'Invalid YouTube URL' }, 400);
+    const adapter = resolvePlatformAdapter(url);
+    if (!adapter) {
+      return respondWithNoCredits({ error: 'Invalid video URL' }, 400);
     }
+
+    const parsedRef = await adapter.parseUrl(url);
+    const videoId = parsedRef.platformVideoId;
 
     if (shouldUseMockData()) {
       console.log(
@@ -136,12 +222,75 @@ async function handler(request: NextRequest) {
       });
     }
 
+    if (adapter.platform !== 'youtube') {
+      const metadata = await adapter.fetchMetadata(parsedRef);
+      const videoRef: VideoRef = {
+        ...parsedRef,
+        canonicalUrl: metadata.canonicalUrl,
+        platformVideoId: metadata.platformVideoId,
+        platformPartId: metadata.platformPartId ?? parsedRef.platformPartId ?? null,
+        raw: {
+          ...(parsedRef.raw ?? {}),
+          ...(
+            metadata.raw && typeof metadata.raw === 'object'
+              ? metadata.raw as Record<string, unknown>
+              : {}
+          ),
+        },
+      };
+      const transcriptResult = await adapter.fetchTranscript(videoRef, {
+        preferredLanguage: lang,
+        expectedDuration: expectedDuration ?? metadata.duration,
+      });
+      const rawSegments = rawSegmentsFromTranscriptResult(transcriptResult);
+      const videoInfo = serializeVideoInfo(metadata);
+
+      if (rawSegments.length === 0) {
+        return respondWithNoCredits(
+          {
+            error: 'No transcript available for this Bilibili video.',
+            details:
+              'This video has no publicly available Bilibili subtitle track. Configure an authenticated Bilibili transcript source or an ASR fallback to analyze videos without native subtitles.',
+            errorCode: 'NO_NATIVE_SUBTITLE',
+            platform: adapter.platform,
+            videoId: metadata.platformVideoId,
+            videoRef: serializeVideoRef(videoRef),
+            videoInfo,
+            warnings: transcriptResult.warnings,
+          },
+          404
+        );
+      }
+
+      console.log(`[TRANSCRIPT] Using ${adapter.platform} result:`, {
+        videoId: metadata.platformVideoId,
+        segmentCount: rawSegments.length,
+        transcriptDuration: Math.round(calculateTranscriptDuration(rawSegments)),
+        language: transcriptResult.language,
+        availableLanguages: transcriptResult.availableLanguages,
+        source: transcriptResult.source,
+      });
+
+      return NextResponse.json(buildTranscriptResponse({
+        videoId: metadata.platformVideoId,
+        platform: adapter.platform,
+        videoRef,
+        videoInfo,
+        rawSegments,
+        language: transcriptResult.language,
+        availableLanguages: transcriptResult.availableLanguages,
+        expectedDuration: expectedDuration ?? metadata.duration,
+        source: transcriptResult.source,
+        warnings: transcriptResult.warnings,
+      }));
+    }
+
     // ── Strategy: Try YouTube direct first (free), fall back to Supadata (paid) ──
     // YouTube's InnerTube API is free but gets blocked from datacenter IPs.
     // Supadata is a paid API that handles YouTube's bot detection for us.
     // By trying free first, we only pay for Supadata when YouTube blocks us.
 
-    let rawSegments: { text: string; start: number; duration: number }[] | null = null;
+    let rawSegments: RawTranscriptSegment[] | null = null;
     let language: string | undefined;
     let availableLanguages: string[] | undefined;
     let source: 'youtube-direct' | 'supadata' = 'youtube-direct';
@@ -239,18 +388,7 @@ async function handler(request: NextRequest) {
       availableLanguages,
     });
 
-    // Merge segments into complete sentences for better translation
-    const mergedSentences = mergeTranscriptSegmentsIntoSentences(rawSegments);
-    const transformedTranscript = mergedSentences.map((sentence) => ({
-      text: sentence.text,
-      start: sentence.segments[0].start, // Use first segment's start time
-      duration: sentence.segments.reduce((sum, seg) => sum + seg.duration, 0) // Sum all durations
-    }));
-
-    // Calculate transcript duration (time covered by the transcript)
-    const transcriptDuration = rawSegments.length > 0
-      ? rawSegments[rawSegments.length - 1].start + rawSegments[rawSegments.length - 1].duration
-      : 0;
+    const transcriptDuration = calculateTranscriptDuration(rawSegments);
 
     // Determine if transcript might be partial
     const coverageRatio = expectedDuration ? transcriptDuration / expectedDuration : null;
@@ -263,7 +401,6 @@ async function handler(request: NextRequest) {
       videoId,
       source,
       rawSegmentCount: rawSegments.length,
-      mergedSegmentCount: transformedTranscript.length,
       transcriptDuration: Math.round(transcriptDuration),
       expectedDuration: expectedDuration ?? 'not provided',
       coverageRatio: coverageRatio ? `${Math.round(coverageRatio * 100)}%` : 'unknown',
@@ -274,18 +411,16 @@ async function handler(request: NextRequest) {
         : 0
     });
 
-    return NextResponse.json({
+    return NextResponse.json(buildTranscriptResponse({
       videoId,
-      transcript: transformedTranscript,
+      platform: 'youtube',
+      videoRef: parsedRef,
+      rawSegments,
       language,
       availableLanguages,
-      // Transcript metadata for debugging and completeness validation
-      transcriptDuration: Math.round(transcriptDuration),
-      segmentCount: transformedTranscript.length,
-      rawSegmentCount: rawSegments.length,
-      isPartial,
-      coverageRatio: coverageRatio ? Math.round(coverageRatio * 100) : undefined
-    });
+      expectedDuration,
+      source,
+    }));
   } catch (error) {
     console.error('[TRANSCRIPT] Error processing transcript:', {
       error: error instanceof Error ? error.message : String(error),

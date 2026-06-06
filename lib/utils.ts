@@ -11,6 +11,59 @@ export function extractVideoId(url: string): string | null {
   return match ? match[1] : null;
 }
 
+export type SupportedVideoPlatform = 'youtube' | 'bilibili';
+
+export interface SupportedVideoId {
+  platform: SupportedVideoPlatform;
+  videoId: string;
+}
+
+export function extractBilibiliVideoId(url: string): string | null {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+
+  if (!/(^|\.)bilibili\.com$/i.test(parsed.hostname)) {
+    return null;
+  }
+
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  const videoIndex = segments.findIndex((segment) => segment === 'video');
+  const idSegment = videoIndex >= 0 ? segments[videoIndex + 1] : undefined;
+
+  if (!idSegment) {
+    return null;
+  }
+
+  if (/^BV[a-zA-Z0-9]+$/.test(idSegment)) {
+    return idSegment;
+  }
+
+  if (/^av\d+$/i.test(idSegment)) {
+    return idSegment;
+  }
+
+  return null;
+}
+
+export function extractSupportedVideoId(url: string): SupportedVideoId | null {
+  const youtubeId = extractVideoId(url);
+  if (youtubeId) {
+    return { platform: 'youtube', videoId: youtubeId };
+  }
+
+  const bilibiliId = extractBilibiliVideoId(url);
+  if (bilibiliId) {
+    return { platform: 'bilibili', videoId: bilibiliId };
+  }
+
+  return null;
+}
+
 export function buildVideoSlug(title: string | null | undefined, videoId: string | null | undefined): string {
   if (!videoId) {
     return '';

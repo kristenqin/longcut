@@ -304,8 +304,9 @@ const BilibiliAdapter: VideoPlatformAdapter = {
 - `subtitle_url` / `subtitle_url_v2` JSON 字幕下载。
 - `body[].from/to/content` 到 normalized transcript 的转换。
 - B 站 iframe embed config。
+- 可选 `BILIBILI_COOKIE` 请求头，用于服务端登录态字幕源。
 
-当前未实现 WBI 签名、登录 Cookie、PGC/Bangumi、互动视频和多 P 批量分析。遇到需要登录或没有字幕的情况，adapter 返回空 transcript 和 warning，不生成无依据 Concept Map。
+当前未实现 WBI 签名、Cookie 管理 UI、PGC/Bangumi、互动视频、多 P 批量分析和无字幕视频 ASR。遇到需要登录或没有字幕的情况，adapter 返回空 transcript 和 warning，不生成无依据 Concept Map。
 
 更完整的适配动作拆分：
 
@@ -344,3 +345,20 @@ type TranscriptQuality = {
 - `x/player/wbi/v2` 是否必须实现 WBI 签名。
 - `subtitle_url_v2` 与 `subtitle_url` 的差异。
 - AI 字幕 `ai_status` 各状态值含义。
+
+## 当前测试视频状态
+
+测试 URL：
+
+```txt
+https://www.bilibili.com/video/BV1DQ7k6JE4P/
+```
+
+公开态验证结果：
+
+- metadata 可获取：`bvid = BV1DQ7k6JE4P`，`cid = 38881660827`，标题为「大模型中转站，凭啥这么便宜？」。
+- `x/player/v2` 的 `subtitle.subtitles` 为空，且服务端公开态返回 `need_login_subtitle`。
+- `/x/web-interface/view` 的 `subtitle.list` 为空。
+- AI 总结接口在 WBI 签名后仍返回未登录。
+
+因此该视频公开态没有可直接复用的 script。MVP 应返回 `NO_NATIVE_SUBTITLE`，后续要分析此类视频必须接入 `BILIBILI_COOKIE` 支持下的登录态字幕源，或下载音频后调用 ASR fallback。

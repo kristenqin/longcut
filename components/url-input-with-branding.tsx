@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { Loader2, ArrowUp, Link as LinkIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { extractVideoId } from "@/lib/utils";
+import { extractSupportedVideoId } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -41,13 +41,13 @@ export function UrlInputWithBranding({ onSubmit, isLoading = false, initialUrl, 
     setError("");
 
     if (!url.trim()) {
-      setError("Please enter a YouTube URL");
+      setError("Please enter a YouTube or Bilibili URL");
       return;
     }
 
-    const videoId = extractVideoId(url);
-    if (!videoId) {
-      setError("Please enter a valid YouTube URL");
+    const video = extractSupportedVideoId(url);
+    if (!video) {
+      setError("Please enter a valid YouTube or Bilibili URL");
       return;
     }
 
@@ -101,8 +101,8 @@ export function UrlInputWithBranding({ onSubmit, isLoading = false, initialUrl, 
                 onBlur={() => {
                   setIsFocused(false);
                 }}
-                placeholder="Paste Youtube URL link here..."
-                aria-label="YouTube URL"
+                placeholder="Paste YouTube or Bilibili URL here..."
+                aria-label="Video URL"
                 aria-invalid={!!error}
                 aria-describedby={error ? "url-error" : undefined}
                 className="flex-1 border-0 bg-transparent text-[14px] text-[#989999] placeholder:text-[#989999] focus:outline-none min-w-0"

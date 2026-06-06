@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { RightColumnTabs, type RightColumnTabsHandle } from "@/components/right-column-tabs";
 import { YouTubePlayer, type YouTubePlayerHandle } from "@/components/youtube-player";
+import { BilibiliPlayer } from "@/components/bilibili-player";
 import { ConceptMapPanel } from "@/components/concept-map-panel";
 import { HighlightsPanel } from "@/components/highlights-panel";
 import { ThemeSelector } from "@/components/theme-selector";
@@ -32,7 +33,7 @@ type CachedHighlightPayload = {
   themes?: string[];
   topicCandidates?: TopicCandidate[];
 };
-import { buildVideoSlug, extractVideoId } from "@/lib/utils";
+import { buildVideoSlug, extractSupportedVideoId } from "@/lib/utils";
 import { getLanguageName } from "@/lib/language-utils";
 import { NO_CREDITS_USED_MESSAGE } from "@/lib/no-credits-message";
 import { useElapsedTimer } from "@/lib/hooks/use-elapsed-timer";
@@ -48,6 +49,7 @@ import { toast } from "sonner";
 import { hasSpeakerMetadata } from "@/lib/transcript-export";
 import { buildSuggestedQuestionFallbacks } from "@/lib/suggested-question-fallback";
 import type { ConceptMapAnalysis } from "@/lib/concept-map";
+import type { VideoRef } from "@/lib/platform";
 
 const GUEST_LIMIT_MESSAGE = "You've used your free preview. Create a free account for 3 videos/month.";
 const AUTH_LIMIT_MESSAGE = "You've used all 3 free videos this month. Upgrade to Pro for 100 videos/month.";
@@ -67,6 +69,16 @@ const optionalAnalysisFeatures = {
   quickPreview: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_QUICK_PREVIEW),
   takeaways: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_TAKEAWAYS_PLUGIN),
 };
+
+function buildDefaultVideoUrl(routeVideoId: string | null): string {
+  if (!routeVideoId) return "";
+
+  if (/^(BV[a-zA-Z0-9]+|av\d+)$/i.test(routeVideoId)) {
+    return `https://www.bilibili.com/video/${routeVideoId}`;
+  }
+
+  return `https://www.youtube.com/watch?v=${routeVideoId}`;
+}
 
 type LimitCheckResponse = {
   canGenerate: boolean;
@@ -211,6 +223,7 @@ export default function AnalyzePage() {
   // when saving notes, which avoids 404 errors if the row wasn't persisted earlier.
   const [videoDbId, setVideoDbId] = useState<string | null>(null);
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
+  const [currentVideoRef, setCurrentVideoRef] = useState<VideoRef | null>(null);
   const [videoPreview, setVideoPreview] = useState<string>("");
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
@@ -449,7 +462,7 @@ export default function AnalyzePage() {
       const response = await csrfFetch.post(
         '/api/concept-map',
         {
-          videoId,
+          ...(currentVideoRef ? { videoRef: currentVideoRef } : { videoId }),
           videoInfo,
           transcript,
           maxConcepts: 6,
@@ -489,6 +502,7 @@ export default function AnalyzePage() {
     transcript,
     isGeneratingConceptMap,
     videoInfo,
+    currentVideoRef,
   ]);
 
   const requestPlayTopic = useCallback((topic: Topic) => {
@@ -657,7 +671,7 @@ export default function AnalyzePage() {
   }, []);
 
   const lastInitializedKey = useRef<string | null>(null);
-  const normalizedUrl = urlParam ?? (routeVideoId ? `https://www.youtube.com/watch?v=${routeVideoId}` : "");
+  const normalizedUrl = urlParam ?? buildDefaultVideoUrl(routeVideoId);
 
   // Clear auth errors from URL after notifying the user
   useEffect(() => {
@@ -681,10 +695,11 @@ export default function AnalyzePage() {
     preferredLanguage?: string
   ) => {
     try {
-      const extractedVideoId = extractVideoId(url);
-      if (!extractedVideoId) {
-        throw new Error("Invalid YouTube URL");
+      const extractedVideo = extractSupportedVideoId(url);
+      if (!extractedVideo) {
+        throw new Error("Invalid video URL");
       }
+      const extractedVideoId = extractedVideo.videoId;
 
       // Cleanup any pending requests from previous analysis
       abortManager.current.cleanup();
@@ -717,6 +732,7 @@ export default function AnalyzePage() {
       setVideoDuration(0);
       setCitationHighlight(null);
       setVideoInfo(null);
+      setCurrentVideoRef(null);
       setVideoDbId(null);
       setVideoPreview("");
       setPlaybackCommand(null);
@@ -744,7 +760,7 @@ export default function AnalyzePage() {
       // Skip cache when a specific non-English language is requested (user wants a different native transcript)
       const shouldSkipCacheForLanguage = preferredLanguage && preferredLanguage !== 'en';
       
-      if (!forceRegenerate && !shouldSkipCacheForLanguage) {
+      if (extractedVideo.platform === 'youtube' && !forceRegenerate && !shouldSkipCacheForLanguage) {
         const cacheResponse = await fetch("/api/check-video-cache", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -975,6 +991,9 @@ export default function AnalyzePage() {
         availableLanguages = data.availableLanguages;
         transcriptDuration = data.transcriptDuration;
         transcriptIsPartial = data.isPartial;
+        if (data.videoRef) {
+          setCurrentVideoRef(data.videoRef);
+        }
 
         // Log transcript metadata for debugging
         if (transcriptDuration !== undefined) {
@@ -1007,6 +1026,9 @@ export default function AnalyzePage() {
               language,
               availableLanguages,
             };
+            if (videoInfoData.videoRef) {
+              setCurrentVideoRef(videoInfoData.videoRef);
+            }
             setVideoInfo(fetchedVideoInfo);
             const rawDuration = videoInfoData?.duration;
             const numericDuration =
@@ -2011,27 +2033,36 @@ export default function AnalyzePage() {
             {/* Left Column - Video (2/3 width) */}
             <div className="lg:col-span-2">
               <div className="sticky top-[6.5rem] space-y-3.5" id="video-container">
-                <YouTubePlayer
-                  key={videoId}
-                  ref={youtubePlayerRef}
-                  videoId={videoId}
-                  selectedTopic={selectedTopic}
-                  playbackCommand={playbackCommand}
-                  onCommandExecuted={clearPlaybackCommand}
-                  topics={topics}
-                  onTopicSelect={handleTopicSelect}
-                  onTimeUpdate={handleTimeUpdate}
-                  transcript={transcript}
-                  isPlayingAll={isPlayingAll}
-                  playAllIndex={playAllIndex}
-                  onTogglePlayAll={handleTogglePlayAll}
-                  setPlayAllIndex={memoizedSetPlayAllIndex}
-                  setIsPlayingAll={memoizedSetIsPlayingAll}
-                  renderControls={false}
-                  onDurationChange={setVideoDuration}
-                  selectedLanguage={selectedLanguage}
-                  onRequestTranslation={translateWithContext}
-                />
+                {currentVideoRef?.platform === 'bilibili' ? (
+                  <BilibiliPlayer
+                    videoRef={currentVideoRef}
+                    fallbackVideoId={videoId}
+                    playbackCommand={playbackCommand}
+                    onCommandExecuted={clearPlaybackCommand}
+                  />
+                ) : (
+                  <YouTubePlayer
+                    key={videoId}
+                    ref={youtubePlayerRef}
+                    videoId={videoId}
+                    selectedTopic={selectedTopic}
+                    playbackCommand={playbackCommand}
+                    onCommandExecuted={clearPlaybackCommand}
+                    topics={topics}
+                    onTopicSelect={handleTopicSelect}
+                    onTimeUpdate={handleTimeUpdate}
+                    transcript={transcript}
+                    isPlayingAll={isPlayingAll}
+                    playAllIndex={playAllIndex}
+                    onTogglePlayAll={handleTogglePlayAll}
+                    setPlayAllIndex={memoizedSetPlayAllIndex}
+                    setIsPlayingAll={memoizedSetIsPlayingAll}
+                    renderControls={false}
+                    onDurationChange={setVideoDuration}
+                    selectedLanguage={selectedLanguage}
+                    onRequestTranslation={translateWithContext}
+                  />
+                )}
                 {optionalAnalysisFeatures.highlights && (themes.length > 0 || isLoadingThemeTopics || themeError || selectedTheme) && (
                   <div className="flex justify-center">
                     <ThemeSelector
