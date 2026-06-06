@@ -7,6 +7,7 @@ import { generateConceptMapFromTranscript } from '@/lib/concept-map';
 import {
   createTranscriptResult,
   type PlatformKey,
+  type TranscriptSource,
   type VideoRef,
 } from '@/lib/platform';
 import {
@@ -27,7 +28,7 @@ const videoRefSchema = z.object({
 const transcriptMetaSchema = z.object({
   language: z.string().min(2).max(20).optional(),
   availableLanguages: z.array(z.string().min(2).max(20)).optional(),
-  source: z.enum(['manual', 'auto', 'ai', 'unknown']).optional(),
+  source: z.string().max(40).optional(),
 });
 
 const conceptMapRequestSchema = z.object({
@@ -72,6 +73,21 @@ function normalizeVideoRef(body: z.infer<typeof conceptMapRequestSchema>): Video
   throw new Error('videoRef or videoId is required.');
 }
 
+function normalizeTranscriptSource(source?: string): TranscriptSource {
+  switch (source) {
+    case 'manual':
+    case 'auto':
+    case 'ai':
+    case 'unknown':
+      return source;
+    case 'youtube-direct':
+    case 'supadata':
+      return 'auto';
+    default:
+      return 'unknown';
+  }
+}
+
 async function handler(req: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth
@@ -112,7 +128,7 @@ async function handler(req: NextRequest) {
       parsedBody.transcriptMeta?.availableLanguages ??
       parsedBody.videoInfo?.availableLanguages,
     expectedDuration: parsedBody.videoInfo?.duration,
-    source: parsedBody.transcriptMeta?.source ?? 'unknown',
+    source: normalizeTranscriptSource(parsedBody.transcriptMeta?.source),
   });
 
   let analysis;

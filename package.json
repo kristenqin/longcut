@@ -10,6 +10,8 @@
     "docs:check": "doc-pipeline check",
     "docs:build": "doc-pipeline build",
     "docs:dev": "doc-pipeline dev",
+    "mvp:smoke": "node scripts/mvp-smoke.mjs",
+    "mvp:smoke:mock-bilibili": "node scripts/mvp-smoke.mjs --start-server --mock-bilibili-asr --port=3011",
     "validate-env": "tsx scripts/validate-env.ts",
     "stripe:smoke": "node scripts/stripe-smoke.mjs",
     "stripe:setup-portal": "tsx scripts/setup-stripe-portal.ts",

@@ -23,7 +23,9 @@ test('Concept Map API preserves transcript source metadata when provided', () =>
 
   assert.match(routeSource, /transcriptMetaSchema/);
   assert.match(routeSource, /transcriptMeta:\s*transcriptMetaSchema\.optional\(\)/);
-  assert.match(routeSource, /source:\s*parsedBody\.transcriptMeta\?\.source \?\? 'unknown'/);
+  assert.match(routeSource, /normalizeTranscriptSource/);
+  assert.match(routeSource, /case 'youtube-direct':/);
+  assert.match(routeSource, /source:\s*normalizeTranscriptSource\(parsedBody\.transcriptMeta\?\.source\)/);
 });
 
 test('Concept Map API is available to the MVP without requiring authentication', () => {

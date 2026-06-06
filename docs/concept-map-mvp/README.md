@@ -36,6 +36,7 @@ Video URL
 | [09-longcut-system-mapping.md](./09-longcut-system-mapping.md) | 将 MVP 需求映射到现有 LongCut 系统 |
 | [10-ai-model-configuration.md](./10-ai-model-configuration.md) | 定义用户自配置 AI 模型，DeepSeek 作为首个目标 |
 | [11-plugin-isolation-plan.md](./11-plugin-isolation-plan.md) | 定义非主流程功能的软插件化隔离方案 |
+| [12-acceptance-smoke.md](./12-acceptance-smoke.md) | 定义 MVP 一键验收脚本与真实 / 本地 smoke 模式 |
 
 ## 当前结论
 
