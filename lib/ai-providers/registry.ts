@@ -1,3 +1,4 @@
+import { createDeepSeekAdapter } from './deepseek-adapter';
 import { createGeminiAdapter } from './gemini-adapter';
 import { createGrokAdapter } from './grok-adapter';
 import { createMiniMaxAdapter } from './minimax-adapter';
@@ -16,12 +17,14 @@ import type {
 type ProviderFactory = () => ProviderAdapter;
 
 const providerFactories: Record<ProviderKey, ProviderFactory> = {
+  deepseek: createDeepSeekAdapter,
   grok: createGrokAdapter,
   gemini: createGeminiAdapter,
   minimax: createMiniMaxAdapter,
 };
 
 const providerEnvGuards: Record<ProviderKey, () => string | undefined> = {
+  deepseek: () => process.env.DEEPSEEK_API_KEY,
   grok: () => process.env.XAI_API_KEY,
   gemini: () => process.env.GEMINI_API_KEY,
   minimax: () => process.env.MINIMAX_API_KEY,

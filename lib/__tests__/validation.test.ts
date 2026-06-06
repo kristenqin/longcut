@@ -33,6 +33,7 @@ test('model schema defaults to MiniMax model when only MINIMAX_API_KEY is presen
     {
       AI_PROVIDER: undefined,
       NEXT_PUBLIC_AI_PROVIDER: undefined,
+      DEEPSEEK_API_KEY: undefined,
       XAI_API_KEY: undefined,
       GEMINI_API_KEY: undefined,
       MINIMAX_API_KEY: 'test-minimax-key',
@@ -41,6 +42,24 @@ test('model schema defaults to MiniMax model when only MINIMAX_API_KEY is presen
     async () => {
       const { modelSchema } = await importFreshValidationModule();
       assert.equal(modelSchema.parse(undefined), 'MiniMax-M2.7');
+    }
+  );
+});
+
+test('model schema defaults to DeepSeek model when only DEEPSEEK_API_KEY is present', async () => {
+  await withEnv(
+    {
+      AI_PROVIDER: undefined,
+      NEXT_PUBLIC_AI_PROVIDER: undefined,
+      DEEPSEEK_API_KEY: 'test-deepseek-key',
+      XAI_API_KEY: undefined,
+      GEMINI_API_KEY: undefined,
+      MINIMAX_API_KEY: undefined,
+      AI_DEFAULT_MODEL: undefined,
+    },
+    async () => {
+      const { modelSchema } = await importFreshValidationModule();
+      assert.equal(modelSchema.parse(undefined), 'deepseek-v4-flash');
     }
   );
 });

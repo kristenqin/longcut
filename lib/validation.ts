@@ -91,16 +91,19 @@ export const topicSchema = z.object({
   autoPlay: z.boolean().optional()
 });
 
-const DEFAULT_AI_VALIDATION_MODEL =
-  process.env.AI_DEFAULT_MODEL ??
-  getProviderDefaultModel(getEffectiveProviderKey());
+function getDefaultAIValidationModel() {
+  return (
+    process.env.AI_DEFAULT_MODEL ??
+    getProviderDefaultModel(getEffectiveProviderKey())
+  );
+}
 
 // Model selection validation
 export const modelSchema = z
   .string()
   .min(1)
   .max(100)
-  .default(DEFAULT_AI_VALIDATION_MODEL);
+  .default(getDefaultAIValidationModel);
 
 export const topicGenerationModeSchema = z.enum(['smart', 'fast']);
 

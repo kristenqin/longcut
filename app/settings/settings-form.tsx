@@ -10,6 +10,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select'
+import {
   Card,
   CardContent,
   CardDescription,
@@ -20,11 +27,12 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Loader2, AlertCircle, CreditCard, Sparkles } from 'lucide-react'
+import { Loader2, AlertCircle, CreditCard, Sparkles, KeyRound, PlugZap, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { User } from '@supabase/supabase-js'
 import { csrfFetch, getCSRFToken } from '@/lib/csrf-client'
 import { cn } from '@/lib/utils'
+import type { PublicUserAIProviderSettings } from '@/lib/user-ai-settings'
 
 interface Profile {
   id: string
@@ -116,7 +124,10 @@ interface SettingsFormProps {
   profile: Profile | null
   videoCount: number
   subscription: SubscriptionSummary | null
+  aiSettings: PublicUserAIProviderSettings | null
 }
+
+type AISettingsAction = 'save' | 'test' | 'delete'
 
 function formatCancellationDate(periodEnd: string | null | undefined): string | null {
   if (!periodEnd) {
@@ -168,7 +179,7 @@ function formatStatus(subscription: SubscriptionSummary | null): string {
   }
 }
 
-export default function SettingsForm({ user, profile, videoCount, subscription }: SettingsFormProps) {
+export default function SettingsForm({ user, profile, videoCount, subscription, aiSettings }: SettingsFormProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = createClient()
@@ -179,7 +190,13 @@ export default function SettingsForm({ user, profile, videoCount, subscription }
 
   const [loading, setLoading] = useState(false)
   const [billingAction, setBillingAction] = useState<'subscription' | 'topup' | 'portal' | null>(null)
+  const [aiAction, setAIAction] = useState<AISettingsAction | null>(null)
   const [pendingSubscription, setPendingSubscription] = useState<SubscriptionSummary | null>(null)
+  const [savedAISettings, setSavedAISettings] = useState<PublicUserAIProviderSettings | null>(aiSettings)
+  const [aiProvider, setAIProvider] = useState<PublicUserAIProviderSettings['provider']>(aiSettings?.provider ?? 'deepseek')
+  const [aiModel, setAIModel] = useState(aiSettings?.model ?? 'deepseek-v4-flash')
+  const [aiApiKey, setAIApiKey] = useState('')
+  const [aiBaseUrl, setAIBaseUrl] = useState(aiSettings?.apiBaseUrl ?? '')
 
   const currentSubscription = pendingSubscription ?? subscription
 
@@ -196,6 +213,14 @@ export default function SettingsForm({ user, profile, videoCount, subscription }
       setPendingSubscription(null)
     }
   }, [subscription?.tier])
+
+  useEffect(() => {
+    setSavedAISettings(aiSettings)
+    setAIProvider(aiSettings?.provider ?? 'deepseek')
+    setAIModel(aiSettings?.model ?? 'deepseek-v4-flash')
+    setAIBaseUrl(aiSettings?.apiBaseUrl ?? '')
+    setAIApiKey('')
+  }, [aiSettings])
 
   // Poll for subscription updates after Stripe checkout
   useEffect(() => {
@@ -367,6 +392,15 @@ export default function SettingsForm({ user, profile, videoCount, subscription }
     return fullName !== (profile?.full_name || '')
   }, [fullName, profile?.full_name])
 
+  const hasAISettingsChanges = useMemo(() => {
+    return (
+      aiProvider !== (savedAISettings?.provider ?? 'deepseek') ||
+      aiModel.trim() !== (savedAISettings?.model ?? 'deepseek-v4-flash') ||
+      aiBaseUrl.trim() !== (savedAISettings?.apiBaseUrl ?? '') ||
+      aiApiKey.trim().length > 0
+    )
+  }, [aiApiKey, aiBaseUrl, aiModel, aiProvider, savedAISettings])
+
   const planLabel = currentSubscription?.tier === 'pro' ? 'Pro Plan' : 'Free Plan'
   const planStatus = formatStatus(currentSubscription)
   const isCancellationScheduled = Boolean(currentSubscription?.cancelAtPeriodEnd)
@@ -447,6 +481,91 @@ export default function SettingsForm({ user, profile, videoCount, subscription }
       toast.error(message)
     } finally {
       setBillingAction(null)
+    }
+  }
+
+  const buildAISettingsPayload = () => ({
+    provider: aiProvider,
+    model: aiModel.trim(),
+    apiBaseUrl: aiBaseUrl.trim() || undefined,
+    apiKey: aiApiKey.trim() || undefined,
+  })
+
+  const handleSaveAISettings = async () => {
+    try {
+      setAIAction('save')
+      const response = await csrfFetch.put('/api/ai-settings', buildAISettingsPayload())
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to save AI settings')
+      }
+
+      setSavedAISettings(data.settings)
+      setAIApiKey('')
+      toast.success('AI settings saved')
+      router.refresh()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save AI settings'
+      toast.error(message)
+    } finally {
+      setAIAction(null)
+    }
+  }
+
+  const handleTestAISettings = async () => {
+    if (!aiApiKey.trim() && !savedAISettings?.hasApiKey) {
+      toast.error('Enter an API key before testing')
+      return
+    }
+
+    try {
+      setAIAction('test')
+      const response = await csrfFetch.post('/api/ai-settings/test', buildAISettingsPayload())
+      const data = await response.json()
+
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.error || 'Connection test failed')
+      }
+
+      if (!aiApiKey.trim() && savedAISettings) {
+        setSavedAISettings({
+          ...savedAISettings,
+          testedAt: new Date().toISOString(),
+        })
+      }
+
+      toast.success(`Connected to ${data.provider} with ${data.model}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Connection test failed'
+      toast.error(message)
+    } finally {
+      setAIAction(null)
+    }
+  }
+
+  const handleDeleteAISettings = async () => {
+    try {
+      setAIAction('delete')
+      const response = await csrfFetch.delete('/api/ai-settings')
+      const data = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to clear AI settings')
+      }
+
+      setSavedAISettings(null)
+      setAIProvider('deepseek')
+      setAIModel('deepseek-v4-flash')
+      setAIBaseUrl('')
+      setAIApiKey('')
+      toast.success('AI settings cleared')
+      router.refresh()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to clear AI settings'
+      toast.error(message)
+    } finally {
+      setAIAction(null)
     }
   }
 
@@ -595,6 +714,134 @@ export default function SettingsForm({ user, profile, videoCount, subscription }
               </Button>
             </>
           )}
+        </CardFooter>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <CardHeader className="pb-4">
+          <CardTitle className="flex items-center gap-2 text-xl">
+            <KeyRound className="h-5 w-5" />
+            AI model
+          </CardTitle>
+          <CardDescription className="text-sm">
+            Configure the model used for Concept Map analysis.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
+            <div className="space-y-2">
+              <Label htmlFor="aiProvider">Provider</Label>
+              <Select
+                value={aiProvider}
+                onValueChange={(value) =>
+                  setAIProvider(value as PublicUserAIProviderSettings['provider'])
+                }
+              >
+                <SelectTrigger id="aiProvider" className="w-full">
+                  <SelectValue placeholder="Provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="deepseek">DeepSeek</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="aiModel">Model</Label>
+              <Input
+                id="aiModel"
+                value={aiModel}
+                onChange={(event) => setAIModel(event.target.value)}
+                placeholder="deepseek-v4-flash"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="aiApiKey">API key</Label>
+            <Input
+              id="aiApiKey"
+              type="password"
+              value={aiApiKey}
+              onChange={(event) => setAIApiKey(event.target.value)}
+              placeholder={
+                savedAISettings?.apiKeyLast4
+                  ? `Saved key ending in ${savedAISettings.apiKeyLast4}`
+                  : 'Enter API key'
+              }
+              autoComplete="off"
+            />
+            {savedAISettings?.hasApiKey && (
+              <p className="text-xs text-muted-foreground">
+                Saved key ending in {savedAISettings.apiKeyLast4 ?? 'unknown'}
+                {savedAISettings.testedAt ? `, tested ${new Date(savedAISettings.testedAt).toLocaleDateString()}` : ''}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="aiBaseUrl">Base URL</Label>
+            <Input
+              id="aiBaseUrl"
+              value={aiBaseUrl}
+              onChange={(event) => setAIBaseUrl(event.target.value)}
+              placeholder="https://api.deepseek.com"
+            />
+          </div>
+        </CardContent>
+        <CardFooter className="flex flex-wrap justify-end gap-3">
+          {savedAISettings && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleDeleteAISettings}
+              disabled={aiAction !== null}
+            >
+              {aiAction === 'delete' ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Clearing...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Clear
+                </>
+              )}
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleTestAISettings}
+            disabled={aiAction !== null || (!aiApiKey.trim() && !savedAISettings?.hasApiKey)}
+          >
+            {aiAction === 'test' ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Testing...
+              </>
+            ) : (
+              <>
+                <PlugZap className="mr-2 h-4 w-4" />
+                Test
+              </>
+            )}
+          </Button>
+          <Button
+            type="button"
+            onClick={handleSaveAISettings}
+            disabled={aiAction !== null || !hasAISettingsChanges || !aiModel.trim()}
+          >
+            {aiAction === 'save' ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              'Save AI settings'
+            )}
+          </Button>
         </CardFooter>
       </Card>
 

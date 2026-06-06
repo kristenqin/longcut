@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getUsageStats, getUserSubscriptionStatus } from '@/lib/subscription-manager'
+import type { PublicUserAIProviderSettings } from '@/lib/user-ai-settings'
 import SettingsForm from './settings-form'
 
 // Force dynamic rendering to prevent caching of subscription status
@@ -29,6 +30,24 @@ export default async function SettingsPage() {
     .from('user_videos')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', user.id)
+
+  const { data: aiSettingsRow } = await supabase
+    .from('user_ai_provider_settings')
+    .select('provider, model, api_key_last4, api_base_url, tested_at, updated_at')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  const aiSettings = aiSettingsRow
+    ? {
+        provider: aiSettingsRow.provider,
+        model: aiSettingsRow.model,
+        hasApiKey: Boolean(aiSettingsRow.api_key_last4),
+        apiKeyLast4: aiSettingsRow.api_key_last4,
+        apiBaseUrl: aiSettingsRow.api_base_url,
+        testedAt: aiSettingsRow.tested_at,
+        updatedAt: aiSettingsRow.updated_at,
+      } satisfies PublicUserAIProviderSettings
+    : null
 
   // Always fetch subscription and usage for authenticated users
   // getUserSubscriptionStatus returns a default free-tier object if no profile exists
@@ -71,6 +90,7 @@ export default async function SettingsPage() {
         profile={profile}
         videoCount={videoCount ?? 0}
         subscription={subscriptionSummary}
+        aiSettings={aiSettings}
       />
     </div>
   )

@@ -74,6 +74,10 @@ function validateRequiredEnvVars(): ValidationResult {
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
     AI_PROVIDER: process.env.AI_PROVIDER ?? process.env.NEXT_PUBLIC_AI_PROVIDER,
     AI_DEFAULT_MODEL: process.env.AI_DEFAULT_MODEL ?? process.env.NEXT_PUBLIC_AI_MODEL,
+    AI_SETTINGS_ENCRYPTION_KEY:
+      process.env.AI_SETTINGS_ENCRYPTION_KEY ??
+      process.env.CSRF_SALT ??
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
   };
 
   for (const [key, value] of Object.entries(recommended)) {
@@ -85,12 +89,19 @@ function validateRequiredEnvVars(): ValidationResult {
   const preferredProvider =
     process.env.AI_PROVIDER ?? process.env.NEXT_PUBLIC_AI_PROVIDER ?? 'grok';
   const hasMiniMaxKey = !!process.env.MINIMAX_API_KEY?.trim();
+  const hasDeepSeekKey = !!process.env.DEEPSEEK_API_KEY?.trim();
   const hasGrokKey = !!process.env.XAI_API_KEY?.trim();
   const hasGeminiKey = !!process.env.GEMINI_API_KEY?.trim();
 
-  if (!hasMiniMaxKey && !hasGrokKey && !hasGeminiKey) {
+  if (!hasDeepSeekKey && !hasMiniMaxKey && !hasGrokKey && !hasGeminiKey) {
     errors.push(
-      'Missing AI provider key: set MINIMAX_API_KEY for MiniMax, XAI_API_KEY for Grok, or GEMINI_API_KEY for Gemini.'
+      'Missing AI provider key: set DEEPSEEK_API_KEY for DeepSeek, MINIMAX_API_KEY for MiniMax, XAI_API_KEY for Grok, or GEMINI_API_KEY for Gemini.'
+    );
+  }
+
+  if (preferredProvider === 'deepseek' && !hasDeepSeekKey) {
+    errors.push(
+      'AI_PROVIDER is set to "deepseek" but DEEPSEEK_API_KEY is missing.'
     );
   }
 
