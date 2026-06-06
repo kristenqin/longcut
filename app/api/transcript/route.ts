@@ -4,7 +4,11 @@ import { withSecurity, SECURITY_PRESETS } from '@/lib/security-middleware';
 import { shouldUseMockData, getMockTranscript } from '@/lib/mock-data';
 import { mergeTranscriptSegmentsIntoSentences } from '@/lib/transcript-sentence-merger';
 import { NO_CREDITS_USED_MESSAGE } from '@/lib/no-credits-message';
-import { fetchYouTubeTranscript } from '@/lib/youtube-transcript-provider';
+import {
+  fetchYouTubeTranscript,
+  TranscriptProviderError,
+  type TranscriptErrorCode,
+} from '@/lib/youtube-transcript-provider';
 
 function respondWithNoCredits(
   payload: Record<string, unknown>,
@@ -25,6 +29,60 @@ function calculateTranscriptDuration(segments: { start: number; duration: number
   if (segments.length === 0) return 0;
   const lastSegment = segments[segments.length - 1];
   return lastSegment.start + lastSegment.duration;
+}
+
+function youtubeFailureStatus(code: TranscriptErrorCode): number {
+  switch (code) {
+    case 'BOT_DETECTED':
+    case 'IP_BLOCKED':
+      return 429;
+    case 'PAGE_FETCH_FAILED':
+    case 'INNERTUBE_REJECTED':
+    case 'CAPTION_FETCH_FAILED':
+      return 503;
+    case 'AGE_RESTRICTED':
+    case 'VIDEO_UNAVAILABLE':
+      return 403;
+    case 'TRANSCRIPTS_DISABLED':
+    case 'NO_TRANSCRIPT':
+      return 404;
+    default:
+      return 502;
+  }
+}
+
+function buildYoutubeFailurePayload(error: unknown) {
+  if (!(error instanceof TranscriptProviderError)) {
+    return null;
+  }
+
+  switch (error.code) {
+    case 'BOT_DETECTED':
+    case 'IP_BLOCKED':
+      return {
+        status: youtubeFailureStatus(error.code),
+        payload: {
+          error: 'YouTube blocked transcript fetching from this environment.',
+          details:
+            'Configure SUPADATA_API_KEY as a transcript fallback, or run the Next.js server with a network route that can reach YouTube.',
+          errorCode: error.code,
+        },
+      };
+    case 'PAGE_FETCH_FAILED':
+    case 'INNERTUBE_REJECTED':
+    case 'CAPTION_FETCH_FAILED':
+      return {
+        status: youtubeFailureStatus(error.code),
+        payload: {
+          error: 'Could not reach YouTube to fetch the transcript.',
+          details:
+            'The server request failed before transcript availability could be checked. Configure a reachable network/proxy for the Next.js process or set SUPADATA_API_KEY.',
+          errorCode: error.code,
+        },
+      };
+    default:
+      return null;
+  }
 }
 
 async function handler(request: NextRequest) {
@@ -87,6 +145,7 @@ async function handler(request: NextRequest) {
     let language: string | undefined;
     let availableLanguages: string[] | undefined;
     let source: 'youtube-direct' | 'supadata' = 'youtube-direct';
+    let youtubeDirectError: unknown = null;
 
     // ── Attempt 1: YouTube InnerTube API (free) ──
     console.log(`[TRANSCRIPT] Trying YouTube direct for ${videoId} (lang=${lang ?? 'auto'})`);
@@ -100,6 +159,7 @@ async function handler(request: NextRequest) {
         console.log(`[TRANSCRIPT] YouTube direct succeeded: ${rawSegments.length} segments, lang=${language}`);
       }
     } catch (ytError) {
+      youtubeDirectError = ytError;
       console.warn(`[TRANSCRIPT] YouTube direct failed:`, ytError instanceof Error ? ytError.message : String(ytError));
     }
 
@@ -160,6 +220,11 @@ async function handler(request: NextRequest) {
 
     // ── Both methods failed ──
     if (!rawSegments || rawSegments.length === 0) {
+      const youtubeFailure = buildYoutubeFailurePayload(youtubeDirectError);
+      if (youtubeFailure) {
+        return respondWithNoCredits(youtubeFailure.payload, youtubeFailure.status);
+      }
+
       return respondWithNoCredits(
         { error: 'No transcript available for this video. The video may not have subtitles enabled.' },
         404

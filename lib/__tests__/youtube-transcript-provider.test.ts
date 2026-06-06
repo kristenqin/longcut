@@ -219,6 +219,32 @@ test('fetchYouTubeTranscript tries next client when one is rate-limited', async 
   );
 });
 
+test('fetchYouTubeTranscript throws when all reachable clients fail for infrastructure reasons', async () => {
+  await withMockFetch(
+    async (input) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url.includes('youtube.com/watch')) {
+        throw new Error('network timeout');
+      }
+
+      if (url.includes('/youtubei/v1/player')) {
+        throw new Error('network timeout');
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    },
+    async () => {
+      await assert.rejects(
+        () => fetchYouTubeTranscript('video123'),
+        (error) =>
+          error instanceof TranscriptProviderError &&
+          error.code === 'INNERTUBE_REJECTED'
+      );
+    }
+  );
+});
+
 test('fetchYouTubeTranscript parses legacy <text> XML format', async () => {
   await withMockFetch(
     async (input) => {

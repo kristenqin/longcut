@@ -20,6 +20,8 @@
  * Based on the approach from github.com/JimLiu/baoyu-skills
  */
 
+import { fetchYouTubeResource } from './youtube-fetch';
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 /** Result returned to the transcript route — matches the existing interface */
@@ -130,7 +132,7 @@ async function scrapeWatchPage(videoId: string): Promise<PageData> {
 
   let html: string;
   try {
-    const resp = await fetch(url, { headers, redirect: 'follow' });
+    const resp = await fetchYouTubeResource(url, { headers, redirect: 'follow' });
     html = await resp.text();
   } catch (err) {
     throw new TranscriptProviderError('PAGE_FETCH_FAILED', `Failed to fetch YouTube page: ${err}`);
@@ -144,7 +146,7 @@ async function scrapeWatchPage(videoId: string): Promise<PageData> {
     if (consentMatch) {
       const consentValue = consentMatch[1];
       try {
-        const resp2 = await fetch(url, {
+        const resp2 = await fetchYouTubeResource(url, {
           headers: {
             ...headers,
             'Cookie': `CONSENT=YES+${consentValue}`,
@@ -235,7 +237,7 @@ async function fetchInnerTubePlayer(
 
   let response: Response;
   try {
-    response = await fetch(endpoint, {
+    response = await fetchYouTubeResource(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -388,7 +390,7 @@ async function fetchCaptionTrack(baseUrl: string): Promise<{ text: string; start
 
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetchYouTubeResource(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
@@ -576,6 +578,7 @@ export async function fetchYouTubeTranscript(
   // All clients failed
   if (lastError) {
     console.error(`[YT-TRANSCRIPT] All clients failed for ${videoId}. Last error:`, lastError.code, lastError.message);
+    throw lastError;
   }
   return null;
 }

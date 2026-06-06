@@ -1,3 +1,5 @@
+import { fetchYouTubeResource } from './youtube-fetch';
+
 export interface VideoInfoResponse {
   videoId: string;
   title: string;
@@ -23,8 +25,10 @@ export async function fetchYouTubeVideoInfo(
   fetchImpl: typeof fetch = fetch
 ): Promise<VideoInfoResponse> {
   try {
-    const response = await fetchImpl(
-      `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
+    const response = await fetchYouTubeResource(
+      `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
+      {},
+      fetchImpl
     );
 
     if (!response.ok) {
