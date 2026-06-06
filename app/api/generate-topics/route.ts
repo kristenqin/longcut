@@ -5,7 +5,7 @@ import {
 } from '@/lib/validation';
 import { z } from 'zod';
 import { withSecurity } from '@/lib/security-middleware';
-import { generateTopicsFromTranscript } from '@/lib/ai-processing';
+import { generateHighlightReelsFromTranscript } from '@/lib/plugins/highlight-reels';
 
 async function handler(request: NextRequest) {
   try {
@@ -38,7 +38,7 @@ async function handler(request: NextRequest) {
     } = validatedData;
 
     // Use the shared function to generate topics
-    const { topics, candidates } = await generateTopicsFromTranscript(
+    const { topics, candidates } = await generateHighlightReelsFromTranscript(
       transcript,
       {
         videoInfo,

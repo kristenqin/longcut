@@ -7,9 +7,9 @@ import {
 import { z } from 'zod';
 import { withSecurity, SECURITY_PRESETS } from '@/lib/security-middleware';
 import {
-  generateTopicsFromTranscript,
-  generateThemesFromTranscript
-} from '@/lib/ai-processing';
+  generateHighlightReelsFromTranscript,
+  generateHighlightThemesFromTranscript
+} from '@/lib/plugins/highlight-reels';
 import { hasUnlimitedVideoAllowance } from '@/lib/access-control';
 import {
   canGenerateVideo,
@@ -150,7 +150,7 @@ async function handler(req: NextRequest) {
       }
 
       try {
-        const { topics: themedTopics } = await generateTopicsFromTranscript(
+        const { topics: themedTopics } = await generateHighlightReelsFromTranscript(
           transcript,
           {
             videoInfo,
@@ -352,11 +352,10 @@ async function handler(req: NextRequest) {
 
       let themes: string[] = [];
       try {
-        themes = await generateThemesFromTranscript(
+        themes = await generateHighlightThemesFromTranscript(
           transcript,
           videoInfo,
-          undefined,
-          videoInfo?.language
+          { language: videoInfo?.language }
         );
       } catch (error) {
         console.error('Error generating themes for cached video:', error);
@@ -396,7 +395,7 @@ async function handler(req: NextRequest) {
       return response;
     }
 
-    const generationResult = await generateTopicsFromTranscript(
+    const generationResult = await generateHighlightReelsFromTranscript(
       transcript,
       {
         videoInfo,
@@ -412,11 +411,10 @@ async function handler(req: NextRequest) {
 
     let themes: string[] = [];
     try {
-      themes = await generateThemesFromTranscript(
+      themes = await generateHighlightThemesFromTranscript(
         transcript,
         videoInfo,
-        undefined,
-        videoInfo?.language
+        { language: videoInfo?.language }
       );
     } catch (error) {
       console.error('Error generating themes:', error);
