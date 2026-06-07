@@ -133,32 +133,32 @@ function getTranscriptFallbackStatus(result: TranscriptResult): string | undefin
 function buildBilibiliNoTranscriptDetails(fallbackStatus?: string): string {
   switch (fallbackStatus) {
     case 'not_configured':
-      return 'This video has no publicly available Bilibili subtitle track, and the Bilibili ASR fallback is not configured. Set GEMINI_API_KEY to transcribe videos without native subtitles.';
+      return 'This video has no publicly available Bilibili subtitle track. Configure BILIBILI_COOKIE to access login-required subtitles, or enable mock Bilibili ASR only for local smoke validation.';
     case 'disabled':
-      return 'This video has no publicly available Bilibili subtitle track, and Bilibili ASR fallback is disabled. Set BILIBILI_ENABLE_ASR_FALLBACK=true and GEMINI_API_KEY to enable transcription.';
+      return 'This video has no publicly available Bilibili subtitle track, and local mock Bilibili ASR is disabled. Configure BILIBILI_COOKIE for real subtitles.';
     case 'audio_too_large':
-      return 'This video has no publicly available Bilibili subtitle track, and the audio source is larger than the configured ASR upload limit. Increase BILIBILI_ASR_MAX_AUDIO_BYTES or provide a native subtitle source.';
+      return 'This video has no publicly available Bilibili subtitle track, and the audio source is larger than the configured local smoke limit. Increase BILIBILI_ASR_MAX_AUDIO_BYTES or provide a native subtitle source.';
     case 'no_audio':
-      return 'This video has no publicly available Bilibili subtitle track, and Bilibili did not return a usable audio track for ASR fallback.';
+      return 'This video has no publicly available Bilibili subtitle track, and Bilibili did not return a usable audio track for local smoke validation.';
     case 'failed':
-      return 'This video has no publicly available Bilibili subtitle track, and the configured ASR fallback failed while transcribing the audio.';
+      return 'This video has no publicly available Bilibili subtitle track, and the local smoke transcript fallback failed.';
     default:
-      return 'This video has no publicly available Bilibili subtitle track. Configure an authenticated Bilibili transcript source or an ASR fallback to analyze videos without native subtitles.';
+      return 'This video has no publicly available Bilibili subtitle track. Configure BILIBILI_COOKIE for authenticated Bilibili subtitles.';
   }
 }
 
 function buildBilibiliNoTranscriptErrorCode(fallbackStatus?: string): string {
   switch (fallbackStatus) {
     case 'not_configured':
-      return 'ASR_PROVIDER_NOT_CONFIGURED';
+      return 'BILIBILI_TRANSCRIPT_SOURCE_NOT_CONFIGURED';
     case 'disabled':
-      return 'ASR_FALLBACK_DISABLED';
+      return 'BILIBILI_MOCK_TRANSCRIPT_DISABLED';
     case 'audio_too_large':
-      return 'ASR_AUDIO_TOO_LARGE';
+      return 'BILIBILI_AUDIO_TOO_LARGE';
     case 'no_audio':
-      return 'ASR_AUDIO_UNAVAILABLE';
+      return 'BILIBILI_AUDIO_UNAVAILABLE';
     case 'failed':
-      return 'ASR_FAILED';
+      return 'BILIBILI_MOCK_TRANSCRIPT_FAILED';
     default:
       return 'NO_NATIVE_SUBTITLE';
   }

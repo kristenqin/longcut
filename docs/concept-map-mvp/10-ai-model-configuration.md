@@ -11,7 +11,7 @@ tags: [ai-provider, deepseek, model-config, user-settings]
 
 用户应能配置自己常用的 AI provider 和模型，用自己的 key 运行 Concept Map 分析。
 
-DeepSeek 是 MVP 第一适配目标，但设计不能只服务 DeepSeek。原因是 DeepSeek 使用 OpenAI-compatible API，后续可以复用同一抽象支持其他兼容服务。
+DeepSeek 是 MVP 第一适配目标，也是当前 Concept Map 分析默认 provider。MVP 阶段不会在分析失败时静默 fallback 到 Gemini 等其他 provider；用户显式配置的 provider 或 workspace provider 必须被记录到 `modelRun`。
 
 ## 当前 LongCut 状态
 
@@ -19,6 +19,7 @@ DeepSeek 是 MVP 第一适配目标，但设计不能只服务 DeepSeek。原因
 
 | 当前 provider | 当前 key | 当前位置 |
 |---|---|---|
+| DeepSeek | `DEEPSEEK_API_KEY` | `lib/ai-providers/deepseek-adapter.ts` |
 | MiniMax | `MINIMAX_API_KEY` | `lib/ai-providers/minimax-adapter.ts` |
 | Grok | `XAI_API_KEY` | `lib/ai-providers/grok-adapter.ts` |
 | Gemini | `GEMINI_API_KEY` | `lib/ai-providers/gemini-adapter.ts` |
@@ -33,7 +34,7 @@ AI_FAST_MODEL
 AI_PRO_MODEL
 ```
 
-MVP 需要新增用户级配置。环境变量仍可作为 workspace 默认值和 fallback，但不应是唯一方式。
+MVP 需要新增用户级配置。环境变量仍可作为 workspace 默认值，但不应是唯一方式。
 
 ## DeepSeek 基线
 
@@ -85,7 +86,8 @@ Concept Map 分析调用模型时，按以下顺序解析：
 
 1. 当前登录用户启用的 `UserAIModelSettings`。
 2. workspace 环境变量配置，例如 `AI_PROVIDER=deepseek`、`DEEPSEEK_API_KEY`。
-3. 当前已有 provider fallback。
+
+MVP 会把解析出的 provider 显式传给 Concept Map analyzer，避免通用 provider 层在 DeepSeek 失败时静默切换到其他模型。
 
 返回的分析结果必须记录实际使用的 provider/model：
 
@@ -187,17 +189,14 @@ ProviderAdapter.generate(prompt, schema, model options)
 
 这样后续换成其他模型时，不需要改 Concept Map schema、evidence anchoring 或 UI。
 
-## Bilibili ASR 与 Concept Map AI 的边界
+## Bilibili Transcript 与 Concept Map AI 的边界
 
-DeepSeek 是 Concept Map 文本分析的首要 provider。B 站无字幕视频的 ASR fallback 不是 Concept Map 分析，它只负责把音频转成 timestamped transcript。
+DeepSeek 是 Concept Map 文本分析的首要 provider。B 站 transcript 获取不是 Concept Map 分析，它只负责从 B 站字幕接口拿到 timestamped transcript。
 
-当前 ASR MVP 使用 Gemini，因为项目已经有 `@google/generative-ai` 依赖：
+真实 B 站脚本来源：
 
 ```txt
-GEMINI_API_KEY=...
-BILIBILI_ENABLE_ASR_FALLBACK=true
-BILIBILI_ASR_PROVIDER=gemini
-BILIBILI_ASR_MODEL=gemini-2.5-flash-lite
+BILIBILI_COOKIE=...
 ```
 
 本地 smoke 可临时使用：
@@ -212,8 +211,8 @@ mock ASR 只用于验证 B 站 URL、metadata、audio source、transcript UI、C
 流程边界：
 
 ```txt
-Bilibili audio -> Gemini ASR -> TranscriptSegment[]
+Bilibili subtitle API -> TranscriptSegment[]
 TranscriptSegment[] -> user configured provider, e.g. DeepSeek -> ConceptMapAnalysis
 ```
 
-如果用户只配置 DeepSeek 而没有配置 Gemini，YouTube 和有原生字幕的 B 站视频仍可进行 Concept Map 分析；无原生字幕的 B 站视频会停在 transcript 获取阶段，并返回 no-credits 错误。
+如果用户配置 DeepSeek 和 `BILIBILI_COOKIE`，YouTube 和登录态可见字幕的 B 站视频都可进行 Concept Map 分析；无字幕且无 Cookie 的 B 站视频会停在 transcript 获取阶段，并返回 no-credits 错误。

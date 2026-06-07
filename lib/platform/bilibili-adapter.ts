@@ -34,6 +34,7 @@ interface BilibiliViewData {
 
 interface BilibiliSubtitleItem {
   id?: number;
+  id_str?: string;
   lan?: string;
   lan_doc?: string;
   subtitle_url?: string;
@@ -60,6 +61,23 @@ interface BilibiliContext {
   metadata?: VideoMetadata;
 }
 
+interface BilibiliPlayerInfoPayload {
+  code: number;
+  message?: string;
+  data?: {
+    need_login_subtitle?: boolean;
+    subtitle?: {
+      subtitles?: BilibiliSubtitleItem[];
+    };
+  };
+}
+
+interface SubtitleSelectionContext {
+  aid?: number;
+  cid: number;
+  expectedDuration?: number | null;
+}
+
 const BVID_PATTERN = /^BV[a-zA-Z0-9]+$/;
 const AV_PATTERN = /^av(\d+)$/i;
 
@@ -78,8 +96,14 @@ function requestHeaders(referer?: string): HeadersInit {
   return headers;
 }
 
+function shouldDebugBilibiliTranscript(): boolean {
+  const value = process.env.BILIBILI_DEBUG_TRANSCRIPT;
+  return value === '1' || value?.toLowerCase() === 'true';
+}
+
 async function fetchBilibiliJson<T>(url: string, referer?: string): Promise<T> {
   const response = await fetch(url, {
+    cache: 'no-store',
     headers: requestHeaders(referer),
   });
 
@@ -145,35 +169,78 @@ function normalizeSubtitleUrl(url: string): string {
   return url;
 }
 
+function getSubtitleUrl(item: BilibiliSubtitleItem): string | undefined {
+  return item.subtitle_url_v2 ?? item.subtitle_url;
+}
+
 function inferSubtitleSource(item: BilibiliSubtitleItem): TranscriptSource {
   return item.ai_type !== undefined || item.ai_status !== undefined || item.type === 1
     ? 'ai'
     : 'manual';
 }
 
+function subtitleUrlMatchesContext(
+  item: BilibiliSubtitleItem,
+  context: SubtitleSelectionContext
+): boolean {
+  const rawUrl = getSubtitleUrl(item);
+  if (!rawUrl) return false;
+
+  const normalizedUrl = normalizeSubtitleUrl(rawUrl);
+  const haystack = `${normalizedUrl} ${item.id_str ?? ''} ${item.id ?? ''}`;
+  const cid = String(context.cid);
+  const aid = context.aid ? String(context.aid) : '';
+
+  if (aid && haystack.includes(aid) && haystack.includes(cid)) {
+    return true;
+  }
+
+  return haystack.includes(cid);
+}
+
+function shouldRequireContextMatchedSubtitle(
+  context?: SubtitleSelectionContext
+): context is SubtitleSelectionContext {
+  return Boolean(
+    context &&
+      context.cid &&
+      context.expectedDuration &&
+      context.expectedDuration >= 300
+  );
+}
+
 function selectSubtitle(
   subtitles: BilibiliSubtitleItem[],
-  preferredLanguage?: string
+  preferredLanguage?: string,
+  context?: SubtitleSelectionContext
 ): BilibiliSubtitleItem | undefined {
   const usable = subtitles.filter(
-    (subtitle) => subtitle.subtitle_url || subtitle.subtitle_url_v2
+    (subtitle) => getSubtitleUrl(subtitle)
   );
 
   if (usable.length === 0) {
     return undefined;
   }
 
+  const candidates = shouldRequireContextMatchedSubtitle(context)
+    ? usable.filter((subtitle) => subtitleUrlMatchesContext(subtitle, context))
+    : usable;
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
   if (preferredLanguage) {
-    const preferred = usable.find((subtitle) => subtitle.lan === preferredLanguage);
+    const preferred = candidates.find((subtitle) => subtitle.lan === preferredLanguage);
     if (preferred) {
       return preferred;
     }
   }
 
   return (
-    usable.find((subtitle) => inferSubtitleSource(subtitle) === 'manual') ??
-    usable.find((subtitle) => subtitle.lan?.startsWith('zh')) ??
-    usable[0]
+    candidates.find((subtitle) => inferSubtitleSource(subtitle) === 'manual') ??
+    candidates.find((subtitle) => subtitle.lan?.startsWith('zh')) ??
+    candidates[0]
   );
 }
 
@@ -206,6 +273,25 @@ async function fetchViewData(ref: VideoRef): Promise<BilibiliViewData> {
   }
 
   return payload.data;
+}
+
+async function fetchPlayerInfo(context: BilibiliContext): Promise<BilibiliPlayerInfoPayload> {
+  const query = new URLSearchParams({
+    cid: String(context.cid),
+    bvid: context.bvid,
+  });
+  if (context.aid) {
+    query.set('aid', String(context.aid));
+  }
+
+  return fetchBilibiliJson<BilibiliPlayerInfoPayload>(
+    `https://api.bilibili.com/x/player/v2?${query.toString()}`,
+    context.canonicalUrl
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function resolveContext(ref: VideoRef): Promise<BilibiliContext> {
@@ -320,41 +406,73 @@ export const BilibiliAdapter: VideoPlatformAdapter = {
     options: TranscriptOptions = {}
   ): Promise<TranscriptResult> {
     const context = await resolveContext(ref);
-    const query = new URLSearchParams({
-      cid: String(context.cid),
-      bvid: context.bvid,
-    });
-    if (context.aid) {
-      query.set('aid', String(context.aid));
-    }
-
-    const playerInfo = await fetchBilibiliJson<{
-      code: number;
-      message?: string;
-      data?: {
-        need_login_subtitle?: boolean;
-        subtitle?: {
-          subtitles?: BilibiliSubtitleItem[];
-        };
-      };
-    }>(
-      `https://api.bilibili.com/x/player/v2?${query.toString()}`,
-      context.canonicalUrl
-    );
-
-    if (playerInfo.code !== 0) {
-      throw new Error(playerInfo.message || 'Failed to fetch Bilibili player info.');
-    }
-
-    const subtitleInfo = playerInfo.data?.subtitle;
-    const subtitles = subtitleInfo?.subtitles ?? [];
-    const selectedSubtitle = selectSubtitle(subtitles, options.preferredLanguage);
-
     const expectedDuration = options.expectedDuration ?? context.metadata?.duration;
+    const selectionContext: SubtitleSelectionContext = {
+      aid: context.aid,
+      cid: context.cid,
+      expectedDuration,
+    };
+
+    let playerInfo: BilibiliPlayerInfoPayload | null = null;
+    let subtitles: BilibiliSubtitleItem[] = [];
+    let selectedSubtitle: BilibiliSubtitleItem | undefined;
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      playerInfo = await fetchPlayerInfo(context);
+
+      if (playerInfo.code !== 0) {
+        throw new Error(playerInfo.message || 'Failed to fetch Bilibili player info.');
+      }
+
+      const subtitleInfo = playerInfo.data?.subtitle;
+      subtitles = subtitleInfo?.subtitles ?? [];
+      selectedSubtitle = selectSubtitle(
+        subtitles,
+        options.preferredLanguage,
+        selectionContext
+      );
+
+      if (shouldDebugBilibiliTranscript()) {
+        const cookie = process.env.BILIBILI_COOKIE ?? '';
+        console.warn('[BilibiliAdapter] transcript source summary', {
+          attempt,
+          cookieConfigured: cookie.length > 0,
+          cookieLength: cookie.length,
+          code: playerInfo.code,
+          needLoginSubtitle: playerInfo.data?.need_login_subtitle,
+          subtitleCount: subtitles.length,
+          selectedLanguage: selectedSubtitle?.lan,
+          firstSubtitleKeys: subtitles[0] ? Object.keys(subtitles[0]) : [],
+          subtitleUrlLengths: subtitles.slice(0, 3).map((subtitle) => ({
+            lan: subtitle.lan,
+            urlLength:
+              typeof subtitle.subtitle_url === 'string'
+                ? subtitle.subtitle_url.length
+                : null,
+            urlV2Length:
+              typeof subtitle.subtitle_url_v2 === 'string'
+                ? subtitle.subtitle_url_v2.length
+                : null,
+            contextMatched: subtitleUrlMatchesContext(subtitle, selectionContext),
+          })),
+        });
+      }
+
+      if (
+        selectedSubtitle ||
+        attempt === 5 ||
+        subtitles.length === 0 ||
+        !shouldRequireContextMatchedSubtitle(selectionContext)
+      ) {
+        break;
+      }
+
+      await sleep(150 * attempt);
+    }
 
     if (!selectedSubtitle) {
       const nativeWarnings = [
-        playerInfo.data?.need_login_subtitle
+        playerInfo?.data?.need_login_subtitle
           ? 'Bilibili subtitles require login for this video.'
           : 'No Bilibili subtitle track is available for this video.',
       ];
@@ -404,7 +522,7 @@ export const BilibiliAdapter: VideoPlatformAdapter = {
     }
 
     const subtitleUrl = normalizeSubtitleUrl(
-      selectedSubtitle.subtitle_url_v2 ?? selectedSubtitle.subtitle_url ?? ''
+      getSubtitleUrl(selectedSubtitle) ?? ''
     );
     const subtitleJson = await fetchBilibiliJson<BilibiliSubtitleJson>(
       subtitleUrl,

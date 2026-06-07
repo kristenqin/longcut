@@ -2,6 +2,10 @@
 
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import nextEnv from '@next/env';
+
+const { loadEnvConfig } = nextEnv;
+loadEnvConfig(process.cwd(), true);
 
 const DEFAULT_YOUTUBE_URL = 'https://www.youtube.com/watch?v=pjJqOgFyCxI';
 const DEFAULT_BILIBILI_URL =

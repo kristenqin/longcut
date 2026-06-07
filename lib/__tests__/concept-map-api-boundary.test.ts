@@ -13,6 +13,9 @@ test('Concept Map API uses optional user AI settings and the Concept Map analyze
   assert.match(routeSource, /generateConceptMapFromTranscript/);
   assert.match(routeSource, /resolveUserAIProviderConfig/);
   assert.match(routeSource, /createUserConfiguredGenerateAI/);
+  assert.match(routeSource, /getConfiguredProviderKey/);
+  assert.match(routeSource, /workspaceProvider\s*=\s*getConfiguredProviderKey\(\) \?\? 'deepseek'/);
+  assert.match(routeSource, /provider:\s*userAIConfig\?\.provider \?\? workspaceProvider/);
   assert.match(routeSource, /createTranscriptResult/);
   assert.match(routeSource, /configSource:\s*userAIConfig \? 'user' : 'workspace_default'/);
   assert.doesNotMatch(routeSource, /@\/lib\/ai-processing/);

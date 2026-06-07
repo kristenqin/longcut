@@ -1,10 +1,3 @@
-import {
-  GoogleGenerativeAI,
-  SchemaType,
-  type GenerationConfig,
-} from '@google/generative-ai';
-import { z } from 'zod';
-
 type RawTranscriptSegment = {
   text: string;
   start: number;
@@ -19,7 +12,7 @@ type AsrFallbackStatus =
   | 'audio_too_large'
   | 'failed';
 
-type AsrProvider = 'gemini' | 'mock';
+type AsrProvider = 'mock';
 
 interface BilibiliDashAudio {
   id?: number;
@@ -73,7 +66,7 @@ export interface BilibiliAsrTranscriptResult {
   raw: {
     asr: {
       status: AsrFallbackStatus;
-      provider: AsrProvider;
+      provider?: AsrProvider;
       model?: string;
       audio?: {
         id?: number;
@@ -93,24 +86,8 @@ type AudioTranscriber = (
 ) => Promise<AudioTranscriptionResult>;
 
 const DEFAULT_MAX_AUDIO_BYTES = 20 * 1024 * 1024;
-const DEFAULT_TIMEOUT_MS = 240_000;
-const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
-const DEFAULT_GEMINI_ASR_MODEL = 'gemini-2.5-flash-lite';
 
 let transcriberForTest: AudioTranscriber | null = null;
-
-const geminiAsrSegmentSchema = z.object({
-  start: z.coerce.number(),
-  duration: z.coerce.number().optional(),
-  end: z.coerce.number().optional(),
-  text: z.coerce.string(),
-});
-
-const geminiAsrResponseSchema = z.object({
-  language: z.string().optional(),
-  segments: z.array(geminiAsrSegmentSchema),
-  warnings: z.array(z.string()).optional(),
-});
 
 class BilibiliAsrError extends Error {
   constructor(
@@ -136,47 +113,26 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
-function hasUsableGeminiKey(): boolean {
-  const key = process.env.GEMINI_API_KEY?.trim();
-  return Boolean(key && !key.includes('your_gemini_api_key_here'));
-}
-
 function getAsrConfig():
   | {
-    enabled: true;
+      enabled: true;
       provider: AsrProvider;
       model: string;
       maxAudioBytes: number;
-      timeoutMs: number;
-      maxOutputTokens: number;
     }
   | {
-    enabled: false;
-      provider: AsrProvider;
+      enabled: false;
       status: 'disabled' | 'not_configured';
       reason: string;
     } {
-  const provider = (process.env.BILIBILI_ASR_PROVIDER ?? 'gemini')
+  const provider = (process.env.BILIBILI_ASR_PROVIDER ?? '')
     .trim()
     .toLowerCase();
-  const enabledOverride = parseBooleanEnv(
-    process.env.BILIBILI_ENABLE_ASR_FALLBACK
-  );
-
-  if (enabledOverride === false) {
-    return {
-      enabled: false,
-      provider: provider === 'mock' ? 'mock' : 'gemini',
-      status: 'disabled',
-      reason: 'Bilibili ASR fallback is disabled by BILIBILI_ENABLE_ASR_FALLBACK=false.',
-    };
-  }
 
   if (provider === 'mock') {
     if (parseBooleanEnv(process.env.BILIBILI_ENABLE_MOCK_ASR) !== true) {
       return {
         enabled: false,
-        provider: 'mock',
         status: 'disabled',
         reason:
           'Mock Bilibili ASR is disabled. Set BILIBILI_ENABLE_MOCK_ASR=true for local end-to-end validation only.',
@@ -191,49 +147,14 @@ function getAsrConfig():
         process.env.BILIBILI_ASR_MAX_AUDIO_BYTES,
         DEFAULT_MAX_AUDIO_BYTES
       ),
-      timeoutMs: DEFAULT_TIMEOUT_MS,
-      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
-    };
-  }
-
-  if (provider !== 'gemini') {
-    return {
-      enabled: false,
-      provider: 'gemini',
-      status: 'not_configured',
-      reason: `Bilibili ASR provider "${provider}" is not supported yet. Use BILIBILI_ASR_PROVIDER=gemini.`,
-    };
-  }
-
-  if (!hasUsableGeminiKey()) {
-    return {
-      enabled: false,
-      provider: 'gemini',
-      status: 'not_configured',
-      reason:
-        'Bilibili ASR fallback is not configured. Set GEMINI_API_KEY to transcribe Bilibili videos without native subtitles.',
     };
   }
 
   return {
-    enabled: true,
-    provider: 'gemini',
-    model:
-      process.env.BILIBILI_ASR_MODEL?.trim() ||
-      process.env.GEMINI_ASR_MODEL?.trim() ||
-      DEFAULT_GEMINI_ASR_MODEL,
-    maxAudioBytes: parsePositiveInteger(
-      process.env.BILIBILI_ASR_MAX_AUDIO_BYTES,
-      DEFAULT_MAX_AUDIO_BYTES
-    ),
-    timeoutMs: parsePositiveInteger(
-      process.env.BILIBILI_ASR_TIMEOUT_MS,
-      DEFAULT_TIMEOUT_MS
-    ),
-    maxOutputTokens: parsePositiveInteger(
-      process.env.BILIBILI_ASR_MAX_OUTPUT_TOKENS,
-      DEFAULT_MAX_OUTPUT_TOKENS
-    ),
+    enabled: false,
+    status: 'not_configured',
+    reason:
+      'No native Bilibili subtitle track is available. Configure BILIBILI_COOKIE for login-required subtitles, or use BILIBILI_ASR_PROVIDER=mock only for local smoke validation.',
   };
 }
 
@@ -283,6 +204,7 @@ async function fetchPlayurl(input: BilibiliAsrInput): Promise<BilibiliPlayurlPay
   const response = await fetch(
     `https://api.bilibili.com/x/player/playurl?${query.toString()}`,
     {
+      cache: 'no-store',
       headers: requestHeaders(input.canonicalUrl),
     }
   );
@@ -311,6 +233,7 @@ async function downloadAudio(
   maxBytes: number
 ): Promise<Buffer> {
   const response = await fetch(url, {
+    cache: 'no-store',
     headers: requestHeaders(referer, '*/*'),
   });
 
@@ -362,184 +285,6 @@ async function downloadAudio(
   }
 
   return Buffer.concat(chunks);
-}
-
-function buildGeminiPrompt(input: AudioTranscriberInput): string {
-  const durationText =
-    input.expectedDuration && input.expectedDuration > 0
-      ? `${Math.round(input.expectedDuration)} seconds`
-      : 'unknown';
-  const languageHint = input.preferredLanguage
-    ? `Preferred transcript language: ${input.preferredLanguage}.`
-    : 'Keep the transcript in the original spoken language.';
-
-  return `You are transcribing a Bilibili video for a concept-map analysis tool.
-
-Return strict JSON only. Do not use Markdown.
-
-Task:
-- Transcribe the provided audio into timestamped transcript segments.
-- Use seconds from the start of the video for timestamps.
-- Segment at sentence or short-thought boundaries, usually 4 to 12 seconds per segment.
-- Preserve meaning and important terms exactly enough for evidence lookup.
-- If timestamps are approximate, still keep them monotonic and useful for seeking.
-
-Video title: ${input.title || 'unknown'}
-Expected duration: ${durationText}
-${languageHint}
-
-JSON shape:
-{
-  "language": "zh-CN",
-  "segments": [
-    { "start": 0, "duration": 5.2, "text": "..." }
-  ],
-  "warnings": []
-}`;
-}
-
-function buildGeminiGenerationConfig(maxOutputTokens: number): GenerationConfig {
-  return {
-    temperature: 0,
-    maxOutputTokens,
-    responseMimeType: 'application/json',
-    responseSchema: {
-      type: SchemaType.OBJECT,
-      properties: {
-        language: { type: SchemaType.STRING },
-        segments: {
-          type: SchemaType.ARRAY,
-          items: {
-            type: SchemaType.OBJECT,
-            properties: {
-              start: { type: SchemaType.NUMBER },
-              duration: { type: SchemaType.NUMBER },
-              text: { type: SchemaType.STRING },
-            },
-            required: ['start', 'duration', 'text'],
-          },
-        },
-        warnings: {
-          type: SchemaType.ARRAY,
-          items: { type: SchemaType.STRING },
-        },
-      },
-      required: ['segments'],
-    },
-  };
-}
-
-function extractJsonPayload(text: string): string {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenced?.[1]) {
-    return fenced[1].trim();
-  }
-
-  const firstBrace = trimmed.indexOf('{');
-  const lastBrace = trimmed.lastIndexOf('}');
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    return trimmed.slice(firstBrace, lastBrace + 1);
-  }
-
-  return trimmed;
-}
-
-function normalizeAsrSegments(
-  segments: z.infer<typeof geminiAsrSegmentSchema>[],
-  expectedDuration?: number | null
-): RawTranscriptSegment[] {
-  const sorted = segments
-    .map((segment) => ({
-      text: segment.text.trim(),
-      start: segment.start,
-      duration: segment.duration,
-      end: segment.end,
-    }))
-    .filter((segment) => segment.text && Number.isFinite(segment.start))
-    .map((segment) => ({
-      ...segment,
-      start: Math.max(0, segment.start),
-    }))
-    .sort((left, right) => left.start - right.start);
-
-  return sorted.map((segment, index) => {
-    const nextStart = sorted[index + 1]?.start;
-    let duration =
-      typeof segment.duration === 'number' && Number.isFinite(segment.duration)
-        ? segment.duration
-        : typeof segment.end === 'number' && Number.isFinite(segment.end)
-          ? segment.end - segment.start
-          : typeof nextStart === 'number'
-            ? nextStart - segment.start
-            : 3;
-
-    if (!Number.isFinite(duration) || duration <= 0) {
-      duration = 3;
-    }
-
-    if (
-      expectedDuration &&
-      expectedDuration > 0 &&
-      segment.start < expectedDuration &&
-      segment.start + duration > expectedDuration + 5
-    ) {
-      duration = Math.max(0.1, expectedDuration - segment.start);
-    }
-
-    return {
-      text: segment.text,
-      start: segment.start,
-      duration,
-    };
-  });
-}
-
-async function transcribeAudioWithGemini(
-  input: AudioTranscriberInput,
-  config: Extract<ReturnType<typeof getAsrConfig>, { enabled: true }>
-): Promise<AudioTranscriptionResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new BilibiliAsrError('GEMINI_API_KEY is missing.', 'not_configured');
-  }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: config.model,
-    generationConfig: buildGeminiGenerationConfig(config.maxOutputTokens),
-  });
-  const prompt = buildGeminiPrompt(input);
-  const startedAt = Date.now();
-  const result = await model.generateContent(
-    [
-      { text: prompt },
-      {
-        inlineData: {
-          mimeType: input.mimeType,
-          data: Buffer.from(input.audioBytes).toString('base64'),
-        },
-      },
-    ],
-    { timeout: config.timeoutMs }
-  );
-
-  const response = result.response;
-  const text = response.text();
-  const parsed = geminiAsrResponseSchema.parse(
-    JSON.parse(extractJsonPayload(text))
-  );
-
-  return {
-    language: parsed.language?.trim() || input.preferredLanguage,
-    segments: normalizeAsrSegments(parsed.segments, input.expectedDuration),
-    warnings: parsed.warnings,
-    raw: {
-      model: config.model,
-      usage: response.usageMetadata,
-      latencyMs: Date.now() - startedAt,
-    },
-  };
 }
 
 function transcribeAudioWithMock(input: AudioTranscriberInput): AudioTranscriptionResult {
@@ -606,7 +351,6 @@ export async function fetchBilibiliAsrTranscript(
       raw: {
         asr: {
           status: config.status,
-          provider: config.provider,
           error: config.reason,
         },
       },
@@ -621,7 +365,7 @@ export async function fetchBilibiliAsrTranscript(
     if (!selectedTrack) {
       return {
         segments: [],
-        warnings: ['No Bilibili DASH audio track is available for ASR fallback.'],
+        warnings: ['No Bilibili DASH audio track is available for local smoke validation.'],
         raw: {
           asr: {
             status: 'no_audio',
@@ -648,12 +392,7 @@ export async function fetchBilibiliAsrTranscript(
       input.canonicalUrl,
       config.maxAudioBytes
     );
-    const transcriber = transcriberForTest
-      ? transcriberForTest
-      : config.provider === 'mock'
-        ? transcribeAudioWithMock
-        : (transcriberInput: AudioTranscriberInput) =>
-            transcribeAudioWithGemini(transcriberInput, config);
+    const transcriber = transcriberForTest ?? transcribeAudioWithMock;
     const transcript = await transcriber({
       audioBytes,
       mimeType,
@@ -695,7 +434,7 @@ export async function fetchBilibiliAsrTranscript(
 
     return {
       segments: [],
-      warnings: [`Bilibili ASR fallback failed: ${message}`],
+      warnings: [`Bilibili local smoke ASR failed: ${message}`],
       raw: {
         asr: {
           status,

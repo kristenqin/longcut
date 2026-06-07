@@ -194,8 +194,8 @@ test('BilibiliAdapter explains no-subtitle videos when ASR is not configured', a
   await withEnv(
     {
       GEMINI_API_KEY: undefined,
-      BILIBILI_ENABLE_ASR_FALLBACK: undefined,
       BILIBILI_ASR_PROVIDER: undefined,
+      BILIBILI_ENABLE_MOCK_ASR: undefined,
     },
     async () => withMockFetch(
       async (input) => {
@@ -245,7 +245,7 @@ test('BilibiliAdapter explains no-subtitle videos when ASR is not configured', a
         assert.equal(transcript.source, 'unknown');
         assert.match(
           transcript.warnings.join('\n'),
-          /Bilibili ASR fallback is not configured/
+          /Configure BILIBILI_COOKIE/
         );
         assert.equal(
           (transcript.raw as any).asr.status,
@@ -261,9 +261,9 @@ test('BilibiliAdapter falls back to mocked ASR audio transcript when native subt
 
   await withEnv(
     {
-      GEMINI_API_KEY: 'test-gemini-key',
-      BILIBILI_ENABLE_ASR_FALLBACK: 'true',
-      BILIBILI_ASR_PROVIDER: undefined,
+      GEMINI_API_KEY: undefined,
+      BILIBILI_ASR_PROVIDER: 'mock',
+      BILIBILI_ENABLE_MOCK_ASR: 'true',
     },
     async () => {
       setBilibiliAudioTranscriberForTest(async (input) => {
@@ -279,7 +279,7 @@ test('BilibiliAdapter falls back to mocked ASR audio transcript when native subt
           ],
           warnings: ['Mock ASR warning'],
           raw: {
-            model: 'mock-gemini',
+            model: 'mock-bilibili-asr',
             usage: { totalTokens: 12 },
           },
         };
@@ -396,13 +396,125 @@ test('BilibiliAdapter falls back to mocked ASR audio transcript when native subt
   assert.ok(requestedUrls.includes('https://audio.example/low.m4s'));
 });
 
+test('BilibiliAdapter retries when long-video subtitle URLs do not match the selected cid', async () => {
+  const requestedUrls: string[] = [];
+  let playerRequests = 0;
+
+  await withMockFetch(
+    async (input) => {
+      const url = String(input);
+      requestedUrls.push(url);
+
+      if (url.includes('/x/web-interface/view')) {
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            data: {
+              aid: 123,
+              bvid: 'BV1SubtitleDrift',
+              cid: 333,
+              title: 'Subtitle drift test',
+              duration: 948,
+              pages: [{ cid: 333, page: 1, part: 'Part 1', duration: 948 }],
+            },
+          }),
+          { status: 200 }
+        );
+      }
+
+      if (url.includes('/x/player/v2')) {
+        playerRequests += 1;
+
+        if (playerRequests === 1) {
+          return new Response(
+            JSON.stringify({
+              code: 0,
+              data: {
+                need_login_subtitle: false,
+                subtitle: {
+                  subtitles: [
+                    {
+                      id: 1,
+                      lan: 'ai-zh',
+                      lan_doc: 'Chinese',
+                      subtitle_url: '//subtitle.example/prod/wrong-video.json',
+                      type: 1,
+                      ai_status: 2,
+                    },
+                  ],
+                },
+              },
+            }),
+            { status: 200 }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            data: {
+              need_login_subtitle: false,
+              subtitle: {
+                subtitles: [
+                  {
+                    id: 2,
+                    lan: 'ai-zh',
+                    lan_doc: 'Chinese',
+                    subtitle_url: '//subtitle.example/prod/123333-correct.json',
+                    type: 1,
+                    ai_status: 2,
+                  },
+                ],
+              },
+            },
+          }),
+          { status: 200 }
+        );
+      }
+
+      if (url === 'https://subtitle.example/prod/123333-correct.json') {
+        return new Response(
+          JSON.stringify({
+            body: [
+              { from: 0, to: 3, content: '正确字幕第一句' },
+              { from: 3, to: 6, content: '正确字幕第二句' },
+            ],
+          }),
+          { status: 200 }
+        );
+      }
+
+      return new Response('{}', { status: 404 });
+    },
+    async () => {
+      const parsed = await BilibiliAdapter.parseUrl(
+        'https://www.bilibili.com/video/BV1SubtitleDrift/'
+      );
+      const transcript = await BilibiliAdapter.fetchTranscript(parsed, {
+        expectedDuration: 948,
+      });
+
+      assert.equal(transcript.source, 'ai');
+      assert.equal(transcript.language, 'ai-zh');
+      assert.equal(transcript.segments[0].text, '正确字幕第一句');
+    }
+  );
+
+  assert.equal(playerRequests, 2);
+  assert.ok(
+    !requestedUrls.includes('https://subtitle.example/prod/wrong-video.json')
+  );
+  assert.ok(
+    requestedUrls.includes('https://subtitle.example/prod/123333-correct.json')
+  );
+});
+
 test('BilibiliAdapter supports explicit local mock ASR provider for MVP smoke validation', async () => {
   const requestedUrls: string[] = [];
 
   await withEnv(
     {
       GEMINI_API_KEY: undefined,
-      BILIBILI_ENABLE_ASR_FALLBACK: undefined,
       BILIBILI_ASR_PROVIDER: 'mock',
       BILIBILI_ENABLE_MOCK_ASR: 'true',
     },

@@ -21,17 +21,17 @@ Bilibili URL
   -> 转成 TranscriptSegment[]
 ```
 
-如果没有字幕，MVP 可以进入 ASR fallback：
+真实 MVP 不对无字幕视频做额外 AI 转写；如果没有字幕，流程停在 transcript 获取阶段，并返回 no-credits 错误。本地验收时可以显式打开 mock transcript fallback：
 
 ```txt
 Bilibili URL
   -> bvid / cid
   -> playurl DASH audio
-  -> audio ASR
+  -> local smoke mock transcript（仅验收）
   -> TranscriptSegment[]
 ```
 
-注意：ASR fallback 的产物仍然必须先落成 timestamped transcript，Concept Map 不能直接根据音频或视频画面生成。若原生字幕和 ASR 都不可用，MVP 应明确提示「该视频没有可用 transcript」，不做无依据概念图。
+注意：真实 MVP 不使用 Gemini 等额外 AI 服务转写 B 站音频。真实脚本来源优先是 B 站原生字幕或登录态字幕；本地 mock ASR 只用于验收链路形状。若原生字幕和登录态字幕都不可用，MVP 应明确提示「该视频没有可用 transcript」，不做无依据概念图。
 
 核心判断：
 
@@ -39,7 +39,7 @@ Bilibili URL
 - `cid` 是分 P / 实际视频内容级标识。
 - 字幕跟随 `cid`，不是只跟随 `bvid`。
 - 缓存 transcript 时不能只用视频 URL 或 `bvid`，必须至少绑定 `platform + bvid/aid + cid + page + subtitle_id + language + source_kind`。
-- 无字幕视频若使用 ASR，缓存键还要区分 `source_kind = asr`、ASR provider、model 和音频 track。
+- 无字幕视频若使用本地 mock transcript，只能进入 smoke 缓存命名空间，不能写入真实内容缓存。
 
 ## 播放能力
 
@@ -158,21 +158,22 @@ type BilibiliSubtitleJson = {
 - `x/player/wbi/v2` 属于 WBI 风控体系，必要时要实现 `w_rid`、`wts` 签名。
 - 未登录时字幕列表可能为空，或者 `need_login_subtitle = true`。
 - 字幕来源可能是人工字幕、AI 字幕、翻译字幕，字段中可能出现 `ai_type`、`ai_status`、`type`、`is_lock`。
+- 实测 `x/player/v2` 对同一 `aid/cid` 可能返回空 `subtitle_url`，也可能返回其他视频的字幕 URL。当前 adapter 对长视频优先要求字幕 URL 中包含当前 `aid/cid`，不匹配或 URL 为空时会短暂重试，避免错误 script 进入 Concept Map。
 
 WBI 签名来源：
 
 - https://socialsisteryi.github.io/bilibili-API-collect/docs/misc/sign/wbi.html
 
-## 无字幕 ASR fallback
+## 无字幕处理与本地 smoke fallback
 
-当前 MVP 已增加 B 站无字幕 fallback：
+当前 MVP 的真实脚本来源是 B 站字幕接口；没有字幕时，不再要求 `GEMINI_API_KEY`。为了本地验收 UI/API/Concept Map 链路，保留显式 mock fallback：
 
 ```txt
 x/player/v2 subtitle list empty
   -> x/player/playurl?bvid=...&cid=...&fnval=16
   -> select lowest-bandwidth DASH audio
   -> download audio with Bilibili referer headers
-  -> Gemini audio transcription
+  -> mock transcript for local smoke only
   -> createTranscriptResult(..., source = "ai")
 ```
 
@@ -180,10 +181,7 @@ x/player/v2 subtitle list empty
 
 | 环境变量 | 用途 |
 |---|---|
-| `GEMINI_API_KEY` | Gemini ASR 调用 key；未配置时不尝试 ASR |
-| `BILIBILI_ENABLE_ASR_FALLBACK` | 显式开启或关闭 ASR fallback |
-| `BILIBILI_ASR_PROVIDER` | MVP 只支持 `gemini` |
-| `BILIBILI_ASR_MODEL` | ASR 使用的 Gemini 模型 |
+| `BILIBILI_COOKIE` | 获取登录态可见的 B 站字幕 |
 | `BILIBILI_ASR_MAX_AUDIO_BYTES` | 单次内联音频下载上限 |
 | `BILIBILI_ENABLE_MOCK_ASR` | 仅本地 smoke：配合 `BILIBILI_ASR_PROVIDER=mock` 生成模拟 transcript |
 
@@ -191,9 +189,8 @@ x/player/v2 subtitle list empty
 
 - metadata 和 `cid = 38881660827` 可以获取。
 - 公开视频字幕接口返回空或登录需求。
-- `x/player/playurl` 可以返回 DASH audio track。
-- 如果未配置 `GEMINI_API_KEY`，`/api/transcript` 会返回 no-credits 错误，并带 `fallbackStatus = "not_configured"`。
-- 如果配置 Gemini ASR，adapter 会尝试生成 `source = "ai"` 的 timestamped transcript，后续 Concept Map 复用同一主流程。
+- 配置 `BILIBILI_COOKIE` 后可以拿到 B 站 AI 字幕，`source = "ai"`；正确字幕 URL 路径包含 `aid = 116697113696415` 与 `cid = 38881660827`，下载后约 498 个原始片段，覆盖约 938 秒。
+- 如果没有可用 Cookie 或字幕，`/api/transcript` 会返回 no-credits 错误，并带 `fallbackStatus = "not_configured"`。
 - 如果只需要本地验收页面和 Concept Map 交互闭环，可以临时设置 `BILIBILI_ASR_PROVIDER=mock` 和 `BILIBILI_ENABLE_MOCK_ASR=true`。该 transcript 会带 warning，不能当作真实视频内容。
 
 ## 不匹配风险
@@ -351,11 +348,11 @@ const BilibiliAdapter: VideoPlatformAdapter = {
 - `x/player/v2` 字幕列表获取。
 - `subtitle_url` / `subtitle_url_v2` JSON 字幕下载。
 - `body[].from/to/content` 到 normalized transcript 的转换。
-- 无原生字幕时，通过 `x/player/playurl` 获取 DASH audio，并用 Gemini ASR 生成 `source = "ai"` 的 transcript。
+- 无原生字幕时，真实路径依赖 `BILIBILI_COOKIE` 获取登录态字幕；本地 smoke 可通过 `x/player/playurl` 获取 DASH audio，并生成 mock transcript。
 - B 站 iframe embed config。
 - 可选 `BILIBILI_COOKIE` 请求头，用于服务端登录态字幕源。
 
-当前未实现 WBI 签名、Cookie 管理 UI、PGC/Bangumi、互动视频和多 P 批量分析。无字幕视频已接入可配置 ASR fallback；如果 ASR 未配置或失败，adapter 返回空 transcript 和 warning，不生成无依据 Concept Map。
+当前未实现 WBI 签名、Cookie 管理 UI、PGC/Bangumi、互动视频和多 P 批量分析。无字幕视频如果没有登录态字幕，adapter 返回空 transcript 和 warning，不生成无依据 Concept Map。
 
 更完整的适配动作拆分：
 
@@ -372,7 +369,7 @@ MVP 默认策略：
 - 只分析 URL 指定分 P。
 - URL 未指定 `p` 时默认分析第 1P。
 - 优先使用 B 站原生字幕。
-- 没有字幕时尝试 ASR fallback；如果未配置或失败，返回 `transcript_status = no_native_subtitle` 和 `fallbackStatus`。
+- 没有字幕时依赖登录态字幕；如果未配置或失败，返回 `transcript_status = no_native_subtitle` 和 `fallbackStatus`。
 - 登录态作为可选能力，不作为 MVP 强依赖。
 - PGC / Bangumi、互动视频、会员 / 充电限制内容暂不承诺覆盖。
 
@@ -410,4 +407,4 @@ https://www.bilibili.com/video/BV1DQ7k6JE4P/
 - `/x/web-interface/view` 的 `subtitle.list` 为空。
 - AI 总结接口在 WBI 签名后仍返回未登录。
 
-因此该视频公开态没有可直接复用的 script。MVP 应返回 `NO_NATIVE_SUBTITLE`，后续要分析此类视频必须接入 `BILIBILI_COOKIE` 支持下的登录态字幕源，或下载音频后调用 ASR fallback。
+因此该视频公开态没有可直接复用的 script。MVP 应返回 `NO_NATIVE_SUBTITLE`，后续要分析此类视频必须接入 `BILIBILI_COOKIE` 支持下的登录态字幕源。

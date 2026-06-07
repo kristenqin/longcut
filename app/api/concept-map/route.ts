@@ -14,6 +14,7 @@ import {
   createUserConfiguredGenerateAI,
   resolveUserAIProviderConfig,
 } from '@/lib/user-ai-settings';
+import { getConfiguredProviderKey } from '@/lib/ai-providers';
 import { transcriptSchema, videoInfoSchema, youtubeIdSchema } from '@/lib/validation';
 
 const platformKeySchema = z.enum(['youtube', 'bilibili']);
@@ -121,6 +122,7 @@ async function handler(req: NextRequest) {
   const userAIConfig = user
     ? await resolveUserAIProviderConfig(supabase, user.id)
     : null;
+  const workspaceProvider = getConfiguredProviderKey() ?? 'deepseek';
   const transcript = createTranscriptResult(parsedBody.transcript, {
     idPrefix: `${videoRef.platform}-${videoRef.platformVideoId}`,
     language: parsedBody.transcriptMeta?.language ?? parsedBody.videoInfo?.language,
@@ -145,7 +147,7 @@ async function handler(req: NextRequest) {
           }
         : undefined,
       transcript,
-      provider: userAIConfig?.provider,
+      provider: userAIConfig?.provider ?? workspaceProvider,
       model: userAIConfig?.model,
       configSource: userAIConfig ? 'user' : 'workspace_default',
       maxConcepts: parsedBody.maxConcepts,
