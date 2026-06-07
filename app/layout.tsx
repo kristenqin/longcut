@@ -7,6 +7,7 @@ import { AuthProvider } from '@/contexts/auth-context';
 import { UserMenu } from '@/components/user-menu';
 import { ToastProvider } from '@/components/toast-provider';
 import { Footer } from '@/components/footer';
+import "@xyflow/react/dist/style.css";
 import "./globals.css";
 
 const geistSans = Geist({
