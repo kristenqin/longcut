@@ -46,7 +46,7 @@ export async function middleware(request: NextRequest) {
     ].join(' '),
     "media-src 'self' blob: https://www.youtube.com",
     "object-src 'none'",
-    'frame-src https://www.youtube.com https://youtube.com',
+    'frame-src https://www.youtube.com https://youtube.com https://player.bilibili.com',
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
