@@ -25,6 +25,7 @@
 *.pem
 .mcp.json
 .claude/
+.jules/
 
 # supabase
 supabase/.temp/
@@ -38,11 +39,9 @@ docs/*
 !docs/doc-pipeline-usage.md
 .worktrees/
 
-# doc pipeline generated output
+# doc pipeline generated output and config
 dist-docs/
-.doc-pipeline/report.json
-.doc-pipeline/agent-report.json
-.doc-pipeline/tmp/
+.doc-pipeline/
 
 # test resources (transcripts for testing)
 resources/transcripts/

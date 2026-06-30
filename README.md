@@ -38,7 +38,6 @@ The project is a Next.js 15 + React 19 application that routes text generation t
 | `scripts/ops/` | Newsletter, credits, grant access, product maintenance |
 | `docs/migrations/` | Feature migration plans (e.g., concept-map MVP) |
 | `docs/superpowers/` | Design specs for feature expansions |
-| `CLAUDE.md` | Extended contributor and architecture handbook |
 
 ## Architecture
 
@@ -110,7 +109,6 @@ The project is a Next.js 15 + React 19 application that routes text generation t
 │   ├── migrations/             # Feature migration plans (concept-map-mvp, etc.)
 │   └── superpowers/            # Design specs for feature expansions
 ├── ARCHITECTURE.md             # Reviewer-first repository map (start here)
-├── CLAUDE.md                   # Extended architecture + contributor handbook
 └── next.config.ts              # Remote image allowlist, Turbopack rules, webpack tweaks
 ```
 
@@ -174,7 +172,7 @@ Create `.env.local` in the repo root:
 ### 3. Supabase Setup
 
 1. Run SQL migrations in `supabase/migrations/` using the Supabase SQL editor or CLI.
-2. Ensure the following tables exist (structure documented in `CLAUDE.md`): `video_analyses`, `user_videos`, `user_notes`, `profiles`, and `rate_limits`.
+2. Ensure the following tables exist (structure documented in `ARCHITECTURE.md`): `video_analyses`, `user_videos`, `user_notes`, `profiles`, and `rate_limits`.
 3. Add the Postgres function `upsert_video_analysis_with_user_link` that stores analyses and links them to a user in `user_videos` (the production project contains the reference implementation—export it or recreate it before local testing).
 4. Enable email OTP/auth providers required by your login flow and configure redirect URLs to match `NEXT_PUBLIC_APP_URL`.
 
@@ -193,13 +191,13 @@ The dev server reaches out to YouTube and your configured AI provider(s) directl
 - Rate limiting records are stored in the `rate_limits` table; clear it when resetting dev limits.
 - Topic generation mode (`smart` vs `fast`) is persisted per-profile and synced via `useModePreference`.
 - `middleware.ts` refreshes Supabase sessions and adds security headers—keep it enabled when deploying to Vercel.
-- Detailed architecture notes, prompts, and database expectations live in `CLAUDE.md`; review it before larger changes.
+- Architecture notes and database expectations are documented in `ARCHITECTURE.md`; review it before larger changes.
 - Doc Pipeline documentation rules live in `docs/doc-pipeline-usage.md`; run `doc-pipeline check` after changing docs.
 - Concept-map migration planning lives in `docs/migrations/concept-map-mvp/`.
 
 ## Contributing
 
-Issues and PRs are welcome. This repo uses the [Anthropic Claude Code Action](https://github.com/anthropics/claude-code-action) for automated pull-request reviews guided by `CLAUDE.md`. Please run `npm run lint` and double-check Supabase migrations before opening a PR.
+Issues and PRs are welcome. This repo uses the [Anthropic Claude Code Action](https://github.com/anthropics/claude-code-action) for automated pull-request reviews. Please run `npm run lint` and double-check Supabase migrations before opening a PR.
 
 ## License
 

@@ -40,8 +40,6 @@ State-changing requests go through `csrfFetch` → `withSecurity` middleware (CS
 | `public/` | Static assets | Low |
 | `resources/` | Sample transcript / video-info fixtures | Low |
 | `.agents/` | Internal agent specs, todos, decisions | Internal only |
-| `.doc-pipeline/` | Doc-pipeline tool config overrides | Internal only |
-| `.jules/` | Internal agent notes | Internal only |
 
 ---
 
@@ -75,7 +73,7 @@ State-changing requests go through `csrfFetch` → `withSecurity` middleware (CS
 
 **Internal process** (not relevant for routine code review):
 
-- `.agents/`, `.doc-pipeline/`, `.jules/`
+- `.agents/`
 - `docs/doc-pipeline-usage.md`
 
 ---
@@ -105,8 +103,7 @@ State-changing requests go through `csrfFetch` → `withSecurity` middleware (CS
 - `lib/ai-client.ts` – provider-agnostic AI entry point
 - `lib/security-middleware.ts` – `withSecurity` wrapper used by all stateful API routes
 - `lib/quote-matcher.ts` – Boyer-Moore + n-gram matching to map AI output back to transcript timestamps
-- `CLAUDE.md` – extended contributor handbook with deeper implementation notes
 
 ---
 
-*This file is intentionally concise. For deeper implementation context see `CLAUDE.md`. For migration planning see `docs/migrations/`.*
+*This file is intentionally concise. For migration planning see `docs/migrations/`.*
