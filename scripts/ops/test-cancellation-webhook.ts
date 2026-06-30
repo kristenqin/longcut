@@ -88,7 +88,7 @@ async function testCancellationWebhook(subscriptionId: string) {
 const subscriptionId = process.argv[2];
 
 if (!subscriptionId) {
-  console.error('❌ Usage: npx tsx scripts/test-cancellation-webhook.ts <subscription_id>');
+  console.error('❌ Usage: npx tsx scripts/ops/test-cancellation-webhook.ts <subscription_id>');
   console.error('\nAvailable subscriptions:');
   console.error('  sub_1SS3LGFxv4zxL2QR05DuM6ot (zzzsamuel12@gmail.com)');
   console.error('  sub_1SRbo8Fxv4zxL2QRUQXccAVA (zhangsamuel1221@gmail.com)');

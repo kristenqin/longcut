@@ -14,7 +14,7 @@
  * Usage:
  *   npm run stripe:setup-portal
  *   or
- *   tsx scripts/setup-stripe-portal.ts
+ *   tsx scripts/stripe/setup-stripe-portal.ts
  *
  * Prerequisites:
  * - STRIPE_SECRET_KEY must be set in .env.local

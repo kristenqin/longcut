@@ -3,7 +3,7 @@
  * Admin Script: Grant Pro Access to Users
  *
  * Usage:
- *   npx tsx scripts/grant-pro-access.ts <email> [options]
+ *   npx tsx scripts/ops/grant-pro-access.ts <email> [options]
  *
  * Options:
  *   --expires <date>    Set expiration date (YYYY-MM-DD), default: 2099-12-31
@@ -12,10 +12,10 @@
  *   --help              Show this help message
  *
  * Examples:
- *   npx tsx scripts/grant-pro-access.ts user@example.com
- *   npx tsx scripts/grant-pro-access.ts user@example.com --expires 2025-12-31
- *   npx tsx scripts/grant-pro-access.ts user@example.com --credits 50
- *   npx tsx scripts/grant-pro-access.ts user@example.com --dry-run
+ *   npx tsx scripts/ops/grant-pro-access.ts user@example.com
+ *   npx tsx scripts/ops/grant-pro-access.ts user@example.com --expires 2025-12-31
+ *   npx tsx scripts/ops/grant-pro-access.ts user@example.com --credits 50
+ *   npx tsx scripts/ops/grant-pro-access.ts user@example.com --dry-run
  */
 
 // Load .env.local file manually (required for standalone script execution)
@@ -119,7 +119,7 @@ function showHelp() {
 Admin Script: Grant Pro Access to Users
 
 Usage:
-  npx tsx scripts/grant-pro-access.ts <email> [options]
+  npx tsx scripts/ops/grant-pro-access.ts <email> [options]
 
 Options:
   --expires <date>    Set expiration date (YYYY-MM-DD), default: 2099-12-31
@@ -129,16 +129,16 @@ Options:
 
 Examples:
   # Grant lifetime Pro access
-  npx tsx scripts/grant-pro-access.ts user@example.com
+  npx tsx scripts/ops/grant-pro-access.ts user@example.com
 
   # Grant Pro access until specific date
-  npx tsx scripts/grant-pro-access.ts user@example.com --expires 2025-12-31
+  npx tsx scripts/ops/grant-pro-access.ts user@example.com --expires 2025-12-31
 
   # Grant Pro + 50 bonus credits
-  npx tsx scripts/grant-pro-access.ts user@example.com --credits 50
+  npx tsx scripts/ops/grant-pro-access.ts user@example.com --credits 50
 
   # Check what would happen (dry run)
-  npx tsx scripts/grant-pro-access.ts user@example.com --dry-run
+  npx tsx scripts/ops/grant-pro-access.ts user@example.com --dry-run
   `);
 }
 

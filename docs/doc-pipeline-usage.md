@@ -65,7 +65,7 @@ git check-ignore -v <path>
 
 - `doc-pipeline.config.ts`
 - `.doc-pipeline/overrides.json`
-- 源文档，例如 `docs/concept-map-mvp/**`
+- 源文档，例如 `docs/migrations/concept-map-mvp/**`
 - agent 工作文档，例如 `.agents/SPECS/**`、`.agents/TODOS/**`、`.agents/DECISIONS/**`
 
 不应提交：
@@ -170,7 +170,7 @@ Doc Pipeline 把 `id` 和 `route` 当成文档身份的一部分：
 - `missingDocs`：按 `module` 检查是否缺 API 文档。
 - `manualReview`：需要人类确认的项目。
 
-如果某个 `module` 有文档但没有 `type: api` 的页面，报告会建议补 API 文档。本项目的 `concept-map-mvp` 已补充 `docs/concept-map-mvp/08-api-reference.md`。
+如果某个 `module` 有文档但没有 `type: api` 的页面，报告会建议补 API 文档。本项目的 `concept-map-mvp` 已补充 `docs/migrations/concept-map-mvp/08-api-reference.md`。
 
 ## Overrides 约束
 

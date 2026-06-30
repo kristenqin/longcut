@@ -21,6 +21,25 @@ The project is a Next.js 15 + React 19 application that routes text generation t
 
 [![Star History Chart](https://api.star-history.com/svg?repos=SamuelZ12/tldw&type=date&legend=top-left)](https://www.star-history.com/#SamuelZ12/tldw&type=date&legend=top-left)
 
+## Repository Map
+
+> For reviewer-oriented navigation see [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+| Path | Role |
+|---|---|
+| `app/` | Next.js pages and API route handlers |
+| `components/` | UI modules for the analysis workspace |
+| `lib/` | Core business logic, AI orchestration, security, transcript processing |
+| `contexts/` | React global context (Supabase auth) |
+| `supabase/` | Database config and SQL migrations |
+| `scripts/env/` | Environment validation |
+| `scripts/smoke/` | Smoke tests (MVP and Stripe) |
+| `scripts/stripe/` | Stripe portal, pricing, and subscription management |
+| `scripts/ops/` | Newsletter, credits, grant access, product maintenance |
+| `docs/migrations/` | Feature migration plans (e.g., concept-map MVP) |
+| `docs/superpowers/` | Design specs for feature expansions |
+| `CLAUDE.md` | Extended contributor and architecture handbook |
+
 ## Architecture
 
 - Frontend stack: Next.js 15 App Router, React 19, TypeScript, Tailwind CSS v4, shadcn/ui, lucide-react, sonner toasts.
@@ -82,6 +101,15 @@ The project is a Next.js 15 + React 19 application that routes text generation t
 ├── public/                     # Static assets (logos, SVGs)
 ├── supabase/
 │   └── migrations/             # Database migrations (e.g., topic_generation_mode column)
+├── scripts/
+│   ├── env/                    # validate-env.ts
+│   ├── smoke/                  # mvp-smoke.mjs, stripe-smoke.mjs
+│   ├── stripe/                 # Stripe portal, pricing, subscription scripts
+│   └── ops/                    # Newsletter, credits, grant access, maintenance scripts
+├── docs/
+│   ├── migrations/             # Feature migration plans (concept-map-mvp, etc.)
+│   └── superpowers/            # Design specs for feature expansions
+├── ARCHITECTURE.md             # Reviewer-first repository map (start here)
 ├── CLAUDE.md                   # Extended architecture + contributor handbook
 └── next.config.ts              # Remote image allowlist, Turbopack rules, webpack tweaks
 ```
@@ -167,6 +195,7 @@ The dev server reaches out to YouTube and your configured AI provider(s) directl
 - `middleware.ts` refreshes Supabase sessions and adds security headers—keep it enabled when deploying to Vercel.
 - Detailed architecture notes, prompts, and database expectations live in `CLAUDE.md`; review it before larger changes.
 - Doc Pipeline documentation rules live in `docs/doc-pipeline-usage.md`; run `doc-pipeline check` after changing docs.
+- Concept-map migration planning lives in `docs/migrations/concept-map-mvp/`.
 
 ## Contributing
 
