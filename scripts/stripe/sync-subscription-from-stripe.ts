@@ -77,8 +77,8 @@ async function syncSubscriptionFromStripe(subscriptionId: string) {
 const subscriptionId = process.argv[2];
 
 if (!subscriptionId) {
-  console.error('❌ Usage: npx tsx scripts/sync-subscription-from-stripe.ts <subscription_id>');
-  console.error('\nExample: npx tsx scripts/sync-subscription-from-stripe.ts sub_1ABC123...');
+  console.error('❌ Usage: npx tsx scripts/stripe/sync-subscription-from-stripe.ts <subscription_id>');
+  console.error('\nExample: npx tsx scripts/stripe/sync-subscription-from-stripe.ts sub_1ABC123...');
   process.exit(1);
 }
 

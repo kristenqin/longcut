@@ -8,7 +8,7 @@
  * Usage:
  *   npm run validate-env
  *   or
- *   tsx scripts/validate-env.ts
+ *   tsx scripts/env/validate-env.ts
  */
 
 import { readFileSync } from 'fs';

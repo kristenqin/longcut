@@ -5,15 +5,15 @@
  * Adds topup credits without modifying subscription status.
  *
  * Usage:
- *   npx tsx scripts/add-credits.ts <email> <credits> [options]
+ *   npx tsx scripts/ops/add-credits.ts <email> <credits> [options]
  *
  * Options:
  *   --dry-run           Show what would happen without making changes
  *   --help              Show this help message
  *
  * Examples:
- *   npx tsx scripts/add-credits.ts user@example.com 10
- *   npx tsx scripts/add-credits.ts user@example.com 50 --dry-run
+ *   npx tsx scripts/ops/add-credits.ts user@example.com 10
+ *   npx tsx scripts/ops/add-credits.ts user@example.com 50 --dry-run
  */
 
 // Load .env.local file manually (required for standalone script execution)
@@ -110,7 +110,7 @@ Admin Script: Add Credits to Users
 Adds topup credits without modifying subscription status.
 
 Usage:
-  npx tsx scripts/add-credits.ts <email> <credits> [options]
+  npx tsx scripts/ops/add-credits.ts <email> <credits> [options]
 
 Arguments:
   <email>             User's email address
@@ -122,10 +122,10 @@ Options:
 
 Examples:
   # Add 10 credits to a user
-  npx tsx scripts/add-credits.ts user@example.com 10
+  npx tsx scripts/ops/add-credits.ts user@example.com 10
 
   # Preview adding 50 credits (dry run)
-  npx tsx scripts/add-credits.ts user@example.com 50 --dry-run
+  npx tsx scripts/ops/add-credits.ts user@example.com 50 --dry-run
   `);
 }
 

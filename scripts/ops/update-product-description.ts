@@ -6,7 +6,7 @@
  * video limit (100 videos per month instead of 40).
  *
  * Usage:
- *   tsx scripts/update-product-description.ts
+ *   tsx scripts/ops/update-product-description.ts
  *
  * Prerequisites:
  * - STRIPE_SECRET_KEY must be set in .env.local

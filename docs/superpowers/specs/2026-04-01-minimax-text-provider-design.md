@@ -51,7 +51,7 @@ Known provider-specific hotspots that must be updated:
 
 - `lib/ai-providers/registry.ts` hard-codes `'grok' | 'gemini'`
 - `lib/ai-providers/client-config.ts` hard-codes the same client provider union
-- `scripts/validate-env.ts` only validates `XAI_API_KEY` and `GEMINI_API_KEY`
+- `scripts/env/validate-env.ts` only validates `XAI_API_KEY` and `GEMINI_API_KEY`
 - `lib/ai-processing.ts` contains `providerKey === 'grok'` logic
 - `app/privacy/page.tsx` references Gemini as the text model provider
 
@@ -106,7 +106,7 @@ Update these files:
 
 - `lib/ai-providers/registry.ts`
 - `lib/ai-providers/client-config.ts`
-- `scripts/validate-env.ts`
+- `scripts/env/validate-env.ts`
 - `README.md`
 
 New environment variables:

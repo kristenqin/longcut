@@ -7,7 +7,7 @@
  * Usage:
  *   npm run stripe:create-prices
  *   or
- *   tsx scripts/create-new-prices.ts
+ *   tsx scripts/stripe/create-new-prices.ts
  *
  * Prerequisites:
  * - STRIPE_SECRET_KEY must be set in .env.local (test mode key)
