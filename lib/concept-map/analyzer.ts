@@ -213,7 +213,7 @@ function buildConceptMapPrompt(input: {
 
   return `<task>
 <role>You are an expert at first-principles conceptual analysis of long-form video transcripts.</role>
-<goal>Build a concept map that explains the transcript's core concepts and how they relate. Do not create highlight reels or time-based chunks.</goal>
+<goal>Build a concept map that explains the transcript's core concepts and how they relate. Do not create time-based summary chunks.</goal>
 <context>
 ${videoContext || 'No video metadata provided.'}
 </context>

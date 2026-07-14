@@ -3,7 +3,7 @@ import type { Metadata } from 'next'
 export const metadata: Metadata = {
   title: 'Privacy Policy | LongCut',
   description:
-    'Learn how LongCut collects, uses, and protects your personal information and video analysis data.',
+    'Learn how LongCut collects, uses, and protects account, transcript, AI key, and Concept Map data.',
 }
 
 const supportEmail = 'zara@longcut.ai'
@@ -13,266 +13,68 @@ export default function PrivacyPage() {
     <div className="mx-auto flex max-w-3xl flex-col gap-10 px-4 pb-16 pt-24 text-base leading-relaxed text-[#3f3f3f] sm:px-6 lg:px-8">
       <header className="space-y-4">
         <h1 className="text-3xl font-bold tracking-tight text-[#3f3f3f]">Privacy Policy</h1>
-        <p className="text-sm text-muted-foreground">Last updated: November 15, 2025</p>
+        <p className="text-sm text-muted-foreground">Last updated: July 13, 2026</p>
         <p>
-          This Privacy Policy describes how LongCut (&ldquo;we&rdquo;, &ldquo;us&rdquo;, or &ldquo;our&rdquo;) collects,
-          uses, and protects your personal information when you use our service. We are committed to protecting your
-          privacy and being transparent about our data practices.
+          This Privacy Policy describes how LongCut collects, uses, and protects your personal information when you use
+          our service.
         </p>
       </header>
 
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Information We Collect</h2>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">Account Information</h3>
         <p>
-          When you create an account, we collect your email address and password. Your password is securely hashed and
-          we never store it in plain text. If you choose to sign in with a third-party provider (such as Google), we
-          receive basic profile information from that provider.
-        </p>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">Video Analysis Data</h3>
-        <p>
-          When you analyze YouTube videos, we store:
-        </p>
-        <ul className="list-disc space-y-2 pl-6">
-          <li>YouTube video IDs and URLs you submit</li>
-          <li>Video metadata (title, author, duration, thumbnail)</li>
-          <li>Video transcripts built from public YouTube caption tracks fetched directly from YouTube</li>
-          <li>AI-generated content (highlights, summaries, topics, questions)</li>
-          <li>Your notes and chat conversations related to videos</li>
-          <li>Videos you mark as favorites</li>
-        </ul>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">Usage Information</h3>
-        <p>
-          We collect information about how you interact with our service, including:
-        </p>
-        <ul className="list-disc space-y-2 pl-6">
-          <li>Rate limit and usage tracking for fair service distribution</li>
-          <li>Timestamps of when you create or update video analyses</li>
-          <li>Your subscription status and billing information (processed by Stripe)</li>
-        </ul>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">Cookies and Session Data</h3>
-        <p>
-          We use cookies and similar technologies to maintain your authenticated session, remember your preferences,
-          and improve your experience. You can control cookie settings through your browser, but some features may not
-          function properly if cookies are disabled.
+          We collect account information such as your email address, saved AI model settings, encrypted provider API
+          keys, submitted YouTube or bilibili URLs, video metadata, transcripts, and generated Concept Map analysis
+          results.
         </p>
       </section>
 
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">How We Use Your Information</h2>
-        <p>We use the information we collect to:</p>
         <ul className="list-disc space-y-2 pl-6">
-          <li>Provide and improve our video analysis service</li>
-          <li>Generate AI-powered highlights, summaries, and insights using your video data</li>
-          <li>Maintain your account and authenticate your access</li>
-          <li>Process payments and manage subscriptions</li>
-          <li>Enforce rate limits and prevent abuse of our service</li>
-          <li>Send important service updates and notifications about your account</li>
-          <li>Respond to your questions and support requests</li>
-          <li>Analyze usage patterns to improve our features and user experience</li>
+          <li>Authenticate your account and keep your session active.</li>
+          <li>Fetch video metadata and transcripts for videos you submit.</li>
+          <li>Use your configured AI provider key to generate Concept Maps.</li>
+          <li>Cache analysis results so repeated opens do not always require a new AI request.</li>
+          <li>Protect the service from abuse and troubleshoot failures.</li>
         </ul>
       </section>
 
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Third-Party Services</h2>
         <p>
-          We use trusted third-party services to provide and enhance our service. Your data may be processed by:
+          We use Supabase for authentication and database storage. We fetch video data from YouTube and bilibili when
+          you submit a video link. AI analysis is sent to the provider you configure, such as DeepSeek, or to the
+          workspace default provider if configured.
         </p>
+      </section>
 
-        <h3 className="text-xl font-medium text-[#3f3f3f]">Supabase</h3>
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">AI Provider Keys</h2>
         <p>
-          We use Supabase for authentication, database storage, and user data management. Supabase hosts our data on
-          secure servers and provides encryption at rest and in transit. Learn more at{' '}
-          <a
-            className="font-medium text-[#3f3f3f] underline underline-offset-4"
-            href="https://supabase.com/privacy"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Supabase&apos;s Privacy Policy
-          </a>
-          .
-        </p>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">MiniMax</h3>
-        <p>
-          We primarily use MiniMax AI models for text-generation features such as video highlights, summaries,
-          suggested questions, and chat responses. To improve reliability, text requests may also be routed to another
-          configured text provider, such as Grok or Gemini, when fallback behavior is enabled. MiniMax&apos;s API
-          services are subject to their{' '}
-          <a
-            className="font-medium text-[#3f3f3f] underline underline-offset-4"
-            href="https://platform.minimax.io/protocol/privacy-policy"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            API Privacy Policy
-          </a>
-          .
-        </p>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">Google Gemini</h3>
-        <p>
-          We use Google&apos;s Gemini models for image-generation features. If you generate images through LongCut,
-          the relevant prompts and request metadata are sent to Gemini for processing. Google&apos;s AI services are
-          subject to their{' '}
-          <a
-            className="font-medium text-[#3f3f3f] underline underline-offset-4"
-            href="https://policies.google.com/privacy"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Privacy Policy
-          </a>
-          .
-        </p>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">YouTube</h3>
-        <p>
-          We fetch public YouTube video metadata and caption tracks directly from YouTube when you analyze a video.
-          This lets us build transcripts and show basic video details without routing that request through a separate
-          transcript provider.
-        </p>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">Stripe</h3>
-        <p>
-          Payment processing is handled by Stripe. We do not store your credit card information. Stripe collects and
-          processes your payment details according to their{' '}
-          <a
-            className="font-medium text-[#3f3f3f] underline underline-offset-4"
-            href="https://stripe.com/privacy"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Privacy Policy
-          </a>
-          . Stripe is PCI-DSS compliant and maintains strict security standards.
+          Provider API keys are encrypted before storage and are never returned to the browser. We use saved keys only
+          to process analysis requests for your account. You can clear your saved AI settings from Settings.
         </p>
       </section>
 
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Data Security</h2>
         <p>
-          We take reasonable measures to protect your information from unauthorized access, alteration, disclosure, or
-          destruction:
-        </p>
-        <ul className="list-disc space-y-2 pl-6">
-          <li>All data transmission uses HTTPS encryption (SSL/TLS)</li>
-          <li>Passwords are hashed using industry-standard encryption</li>
-          <li>Our database is hosted on secure servers with encryption at rest</li>
-          <li>We implement rate limiting and abuse prevention measures</li>
-          <li>Access to user data is restricted to essential operations only</li>
-        </ul>
-        <p>
-          However, no method of transmission over the internet is 100% secure. While we strive to protect your data,
-          we cannot guarantee absolute security.
+          We use HTTPS, server-side key encryption, authentication controls, and database access policies to protect
+          your data. No method of internet transmission is perfectly secure, but we design the system to avoid exposing
+          raw provider API keys to clients.
         </p>
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Your Rights and Choices</h2>
-        <p>You have the following rights regarding your personal information:</p>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">Access and Portability</h3>
+        <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Your Choices</h2>
         <p>
-          You can access your video analyses, notes, and account information at any time through your LongCut account. If
-          you would like to export your data in a portable format, please contact us.
-        </p>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">Correction and Deletion</h3>
-        <p>
-          You can edit or delete your notes, video analyses, and favorites directly from your account. To delete your
-          entire account and all associated data, please contact us at{' '}
+          You can update your profile and clear AI model settings in LongCut. To request account deletion or ask about
+          stored data, contact{' '}
           <a className="font-medium text-[#3f3f3f] underline underline-offset-4" href={`mailto:${supportEmail}`}>
             {supportEmail}
           </a>
-          . We will process account deletion requests within 30 days.
-        </p>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">Marketing Communications</h3>
-        <p>
-          We do not send marketing emails. We only send transactional emails related to your account and subscription.
-          You cannot opt out of essential service communications.
-        </p>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">California Residents (CCPA)</h3>
-        <p>
-          If you are a California resident, you have additional rights under the California Consumer Privacy Act
-          (CCPA), including the right to request disclosure of information we collect and share, and the right to
-          request deletion of your information. We do not sell your personal information.
-        </p>
-
-        <h3 className="text-xl font-medium text-[#3f3f3f]">European Residents (GDPR)</h3>
-        <p>
-          If you are located in the European Economic Area (EEA), you have rights under the General Data Protection
-          Regulation (GDPR), including the right to access, rectify, erase, restrict processing, and data portability.
-          Our legal basis for processing your data is your consent and our legitimate interest in providing the
-          service.
-        </p>
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Data Retention</h2>
-        <p>
-          We retain your personal information for as long as your account is active or as needed to provide our
-          services. If you delete your account, we will delete or anonymize your personal information within 30 days,
-          except where we are required by law to retain certain information (such as for tax or legal compliance).
-        </p>
-        <p>
-          Video analyses that were created while not signed in may be retained for caching purposes but are not linked
-          to your identity.
-        </p>
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Children&apos;s Privacy</h2>
-        <p>
-          LongCut is not intended for children under the age of 13. We do not knowingly collect personal information from
-          children under 13. If you believe we have collected information from a child under 13, please contact us
-          immediately and we will delete it.
-        </p>
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">International Data Transfers</h2>
-        <p>
-          Your information may be transferred to and processed in countries other than your country of residence. These
-          countries may have data protection laws that are different from the laws of your country. By using LongCut, you
-          consent to the transfer of your information to our facilities and third-party service providers.
-        </p>
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Changes to This Privacy Policy</h2>
-        <p>
-          We may update this Privacy Policy from time to time to reflect changes in our practices or for legal,
-          regulatory, or operational reasons. If we make material changes, we will notify you via email or through a
-          notice on our website. The &ldquo;Last updated&rdquo; date at the top of this policy indicates when it was
-          last revised.
-        </p>
-        <p>
-          Your continued use of LongCut after any changes to this Privacy Policy constitutes your acceptance of the
-          updated policy.
-        </p>
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Contact Us</h2>
-        <p>
-          If you have questions or concerns about this Privacy Policy or our data practices, please contact us at:
-        </p>
-        <p>
-          <a className="font-medium text-[#3f3f3f] underline underline-offset-4" href={`mailto:${supportEmail}`}>
-            {supportEmail}
-          </a>
-        </p>
-        <p>
-          We will respond to privacy-related inquiries within 30 days. For urgent security concerns, please indicate
-          that in your email subject line.
+          .
         </p>
       </section>
     </div>

@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withSecurity, SECURITY_PRESETS } from '@/lib/security-middleware';
 import { shouldUseMockData, getMockTranscript } from '@/lib/mock-data';
 import { mergeTranscriptSegmentsIntoSentences } from '@/lib/transcript-sentence-merger';
-import { NO_CREDITS_USED_MESSAGE } from '@/lib/no-credits-message';
 import { resolvePlatformAdapter, type TranscriptResult, type VideoMetadata, type VideoRef } from '@/lib/platform';
+import { invalidJsonBodyResponse, isInvalidJsonBodyError, readJsonObject } from '@/lib/api-json';
 import {
   fetchYouTubeTranscript,
   TranscriptProviderError,
@@ -12,18 +12,11 @@ import {
 
 type RawTranscriptSegment = { text: string; start: number; duration: number };
 
-function respondWithNoCredits(
+function errorResponse(
   payload: Record<string, unknown>,
   status: number
 ) {
-  return NextResponse.json(
-    {
-      ...payload,
-      creditsMessage: NO_CREDITS_USED_MESSAGE,
-      noCreditsUsed: true
-    },
-    { status }
-  );
+  return NextResponse.json(payload, { status });
 }
 
 // Calculate transcript duration from segments
@@ -220,15 +213,15 @@ function buildYoutubeFailurePayload(error: unknown) {
 
 async function handler(request: NextRequest) {
   try {
-    const { url, lang, expectedDuration } = await request.json();
+    const { url, lang, expectedDuration } = await readJsonObject(request);
 
-    if (!url) {
-      return respondWithNoCredits({ error: 'Video URL is required' }, 400);
+    if (!url || typeof url !== 'string') {
+      return errorResponse({ error: 'Video URL is required' }, 400);
     }
 
     const adapter = resolvePlatformAdapter(url);
     if (!adapter) {
-      return respondWithNoCredits({ error: 'Invalid video URL' }, 400);
+      return errorResponse({ error: 'Invalid video URL' }, 400);
     }
 
     const parsedRef = await adapter.parseUrl(url);
@@ -288,15 +281,15 @@ async function handler(request: NextRequest) {
         },
       };
       const transcriptResult = await adapter.fetchTranscript(videoRef, {
-        preferredLanguage: lang,
-        expectedDuration: expectedDuration ?? metadata.duration,
+        preferredLanguage: typeof lang === 'string' ? lang : undefined,
+        expectedDuration: typeof expectedDuration === 'number' ? expectedDuration : metadata.duration,
       });
       const rawSegments = rawSegmentsFromTranscriptResult(transcriptResult);
       const videoInfo = serializeVideoInfo(metadata);
 
       if (rawSegments.length === 0) {
         const fallbackStatus = getTranscriptFallbackStatus(transcriptResult);
-        return respondWithNoCredits(
+        return errorResponse(
           {
             error: 'No transcript available for this Bilibili video.',
             details: buildBilibiliNoTranscriptDetails(fallbackStatus),
@@ -329,7 +322,7 @@ async function handler(request: NextRequest) {
         rawSegments,
         language: transcriptResult.language,
         availableLanguages: transcriptResult.availableLanguages,
-        expectedDuration: expectedDuration ?? metadata.duration,
+        expectedDuration: typeof expectedDuration === 'number' ? expectedDuration : metadata.duration,
         source: transcriptResult.source,
         warnings: transcriptResult.warnings,
       }));
@@ -347,9 +340,12 @@ async function handler(request: NextRequest) {
     let youtubeDirectError: unknown = null;
 
     // ── Attempt 1: YouTube InnerTube API (free) ──
-    console.log(`[TRANSCRIPT] Trying YouTube direct for ${videoId} (lang=${lang ?? 'auto'})`);
+    const preferredLanguage = typeof lang === 'string' ? lang : undefined;
+    const expectedVideoDuration = typeof expectedDuration === 'number' ? expectedDuration : undefined;
+
+    console.log(`[TRANSCRIPT] Trying YouTube direct for ${videoId} (lang=${preferredLanguage ?? 'auto'})`);
     try {
-      const ytResult = await fetchYouTubeTranscript(videoId, lang, expectedDuration);
+      const ytResult = await fetchYouTubeTranscript(videoId, preferredLanguage);
       if (ytResult && ytResult.segments.length > 0) {
         rawSegments = ytResult.segments;
         language = ytResult.language;
@@ -371,7 +367,7 @@ async function handler(request: NextRequest) {
         try {
           const apiUrl = new URL('https://api.supadata.ai/v1/transcript');
           apiUrl.searchParams.set('url', `https://www.youtube.com/watch?v=${videoId}`);
-          if (lang) apiUrl.searchParams.set('lang', lang);
+          if (preferredLanguage) apiUrl.searchParams.set('lang', preferredLanguage);
 
           const supadataResp = await fetch(apiUrl.toString(), {
             method: 'GET',
@@ -421,10 +417,10 @@ async function handler(request: NextRequest) {
     if (!rawSegments || rawSegments.length === 0) {
       const youtubeFailure = buildYoutubeFailurePayload(youtubeDirectError);
       if (youtubeFailure) {
-        return respondWithNoCredits(youtubeFailure.payload, youtubeFailure.status);
+        return errorResponse(youtubeFailure.payload, youtubeFailure.status);
       }
 
-      return respondWithNoCredits(
+      return errorResponse(
         { error: 'No transcript available for this video. The video may not have subtitles enabled.' },
         404
       );
@@ -441,9 +437,9 @@ async function handler(request: NextRequest) {
     const transcriptDuration = calculateTranscriptDuration(rawSegments);
 
     // Determine if transcript might be partial
-    const coverageRatio = expectedDuration ? transcriptDuration / expectedDuration : null;
-    const isPartial = expectedDuration
-      ? transcriptDuration < expectedDuration * 0.5 // Less than 50% coverage
+    const coverageRatio = expectedVideoDuration ? transcriptDuration / expectedVideoDuration : null;
+    const isPartial = expectedVideoDuration
+      ? transcriptDuration < expectedVideoDuration * 0.5 // Less than 50% coverage
       : false;
 
     // Diagnostic logging: track processed transcript stats
@@ -452,7 +448,7 @@ async function handler(request: NextRequest) {
       source,
       rawSegmentCount: rawSegments.length,
       transcriptDuration: Math.round(transcriptDuration),
-      expectedDuration: expectedDuration ?? 'not provided',
+      expectedDuration: expectedVideoDuration ?? 'not provided',
       coverageRatio: coverageRatio ? `${Math.round(coverageRatio * 100)}%` : 'unknown',
       isPartial,
       firstSegmentStart: rawSegments[0]?.start,
@@ -468,16 +464,20 @@ async function handler(request: NextRequest) {
       rawSegments,
       language,
       availableLanguages,
-      expectedDuration,
+      expectedDuration: expectedVideoDuration,
       source,
     }));
   } catch (error) {
+    if (isInvalidJsonBodyError(error)) {
+      return invalidJsonBodyResponse();
+    }
+
     console.error('[TRANSCRIPT] Error processing transcript:', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
       type: error?.constructor?.name
     });
-    return respondWithNoCredits({ error: 'Failed to fetch transcript' }, 500);
+    return errorResponse({ error: 'Failed to fetch transcript' }, 500);
   }
 }
 

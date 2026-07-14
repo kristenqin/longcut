@@ -33,6 +33,7 @@ type ConceptGraphNodeData = {
   concept: ConceptNode;
   selected: boolean;
   relationCount: number;
+  onSelect: (concept: ConceptNode) => void;
 };
 
 type ConceptGraphNode = Node<ConceptGraphNodeData, "concept">;
@@ -110,11 +111,23 @@ function relationLabel(type: ConceptRelationType) {
 function ConceptNodeCard({ data }: NodeProps<ConceptGraphNode>) {
   const style = roleStyles[data.concept.role];
   const importance = Math.round(data.concept.importance * 100);
+  const selectConcept = () => data.onSelect(data.concept);
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-pressed={data.selected}
+      aria-label={`Select concept ${data.concept.label}`}
+      onClick={selectConcept}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectConcept();
+        }
+      }}
       className={cn(
-        "relative h-[126px] w-[230px] rounded-lg border bg-white p-3 text-left shadow-sm transition",
+        "relative h-[126px] w-[230px] cursor-pointer rounded-lg border bg-white p-3 text-left shadow-sm transition focus:outline-none focus:ring-4 focus:ring-slate-900/35 focus:ring-offset-2 focus-visible:ring-4 focus-visible:ring-slate-900/35 focus-visible:ring-offset-2",
         style.border,
         data.selected ? "ring-2 ring-slate-900" : "hover:shadow-md"
       )}
@@ -162,7 +175,8 @@ const nodeTypes = {
 
 function buildElements(
   analysis: ConceptMapAnalysis,
-  selectedConceptId: string | null
+  selectedConceptId: string | null,
+  onSelectConcept: (concept: ConceptNode) => void
 ): {
   nodes: ConceptGraphNode[];
   edges: Edge[];
@@ -221,6 +235,7 @@ function buildElements(
         concept,
         selected: concept.id === selectedConceptId,
         relationCount: relationCounts.get(concept.id) ?? 0,
+        onSelect: onSelectConcept,
       },
       draggable: false,
     };
@@ -266,8 +281,8 @@ export function ConceptGraphCanvas({
   onSelectConcept,
 }: ConceptGraphCanvasProps) {
   const { nodes, edges } = useMemo(
-    () => buildElements(analysis, selectedConceptId),
-    [analysis, selectedConceptId]
+    () => buildElements(analysis, selectedConceptId, onSelectConcept),
+    [analysis, onSelectConcept, selectedConceptId]
   );
 
   return (
@@ -282,7 +297,6 @@ export function ConceptGraphCanvas({
         fitViewOptions={{ padding: 0.18 }}
         minZoom={0.35}
         maxZoom={1.25}
-        onNodeClick={(_, node) => onSelectConcept(node.data.concept)}
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#cbd5e1" gap={22} />

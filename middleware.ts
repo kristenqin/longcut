@@ -1,10 +1,12 @@
 import { type NextRequest } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
 
-function parseHost(url: string | undefined) {
+function parseSupabaseOrigins(url: string | undefined) {
   if (!url) return null;
   try {
-    return new URL(url).host;
+    const parsedUrl = new URL(url);
+    const websocketProtocol = parsedUrl.protocol === 'http:' ? 'ws:' : 'wss:';
+    return [parsedUrl.origin, `${websocketProtocol}//${parsedUrl.host}`];
   } catch {
     return null;
   }
@@ -15,13 +17,11 @@ export async function middleware(request: NextRequest) {
   const response = await updateSession(request);
 
   // Add Content-Security-Policy and other security headers
-  const supabaseHost = parseHost(process.env.NEXT_PUBLIC_SUPABASE_URL);
-  const supabaseConnectSrc = supabaseHost
-    ? [`https://${supabaseHost}`, `wss://${supabaseHost}`]
-    : [];
+  const supabaseConnectSrc =
+    parseSupabaseOrigins(process.env.NEXT_PUBLIC_SUPABASE_URL) ?? [];
 
   // Define CSP directives
-  const cspHeader = [
+  const cspDirectives = [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.youtube.com https://s.ytimg.com https://*.googleapis.com https://js.stripe.com",
     "style-src 'self' 'unsafe-inline'",
@@ -50,8 +50,13 @@ export async function middleware(request: NextRequest) {
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
-    'upgrade-insecure-requests'
-  ].join('; ');
+  ];
+
+  if (process.env.NODE_ENV === 'production') {
+    cspDirectives.push('upgrade-insecure-requests');
+  }
+
+  const cspHeader = cspDirectives.join('; ');
 
   // Apply security headers
   response.headers.set('Content-Security-Policy', cspHeader);

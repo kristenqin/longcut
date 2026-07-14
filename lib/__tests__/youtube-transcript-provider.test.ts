@@ -28,7 +28,7 @@ const FAKE_WATCH_PAGE = `
 
 test('fetchYouTubeTranscript returns transcript when Android client succeeds', async () => {
   await withMockFetch(
-    async (input, init) => {
+    async (input) => {
       const url = typeof input === 'string' ? input : input.toString();
 
       // Page scrape request

@@ -70,8 +70,7 @@ export const YouTubeAdapter: VideoPlatformAdapter = {
 
     const result = await fetchYouTubeTranscript(
       ref.platformVideoId,
-      options.preferredLanguage,
-      options.expectedDuration ?? undefined
+      options.preferredLanguage
     );
 
     if (!result) {

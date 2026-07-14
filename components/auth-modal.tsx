@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { AlertCircle, Loader2, CheckCircle, Youtube } from 'lucide-react'
+import { AlertCircle, Loader2, CheckCircle, KeyRound } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
 
@@ -18,7 +18,7 @@ interface AuthModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess?: () => void
-  trigger?: 'generation-limit' | 'save-video' | 'manual' | 'save-note'
+  trigger?: 'generation-limit' | 'manual'
   currentVideoId?: string | null
 }
 
@@ -32,6 +32,21 @@ export function AuthModal({ open, onOpenChange, onSuccess, trigger = 'manual', c
   const appUrl = resolveAppUrl(typeof window !== 'undefined' ? window.location.origin : undefined)
   const isInApp = useInAppBrowser()
 
+  const mapAuthError = (authError: unknown) => {
+    const message =
+      authError instanceof Error
+        ? authError.message
+        : typeof authError === 'string'
+          ? authError
+          : ''
+
+    if (/failed to fetch|network|fetch failed|load failed|connection/i.test(message)) {
+      return 'Could not reach the auth service. Check your connection and try again.'
+    }
+
+    return message || 'Authentication failed. Please try again.'
+  }
+
   const handleCopyLink = async () => {
     await navigator.clipboard.writeText(window.location.href)
     toast.success('Link copied! Paste it in Chrome, Safari, or Firefox.')
@@ -41,127 +56,105 @@ export function AuthModal({ open, onOpenChange, onSuccess, trigger = 'manual', c
     setLoading(true)
     setError(null)
 
-    const redirectUrl = `${appUrl}/auth/callback`
-    console.log('🔐 Starting signup process...')
-    console.log('📧 Email:', email)
-    console.log('🔗 Redirect URL:', redirectUrl)
-    console.log('🌐 NEXT_PUBLIC_APP_URL:', process.env.NEXT_PUBLIC_APP_URL)
-    console.log('🧭 Resolved App URL:', appUrl)
+    try {
+      const response = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${appUrl}/auth/callback`,
+        },
+      })
 
-    const response = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl,
-      },
-    })
+      if (response.error) {
+        throw response.error
+      }
 
-    console.log('📨 Full Supabase signup response:', JSON.stringify(response, null, 2))
-    console.log('✅ User object:', response.data?.user)
-    console.log('📬 Session object:', response.data?.session)
-    console.log('❌ Error:', response.error)
-
-    if (response.error) {
-      console.error('❌ Signup error:', response.error.message)
-      setError(response.error.message)
-    } else {
-      console.log('✅ Signup successful! User ID:', response.data?.user?.id)
-      console.log('📧 Email confirmation sent to:', response.data?.user?.email)
-      console.log('⚠️ Email confirmed?:', response.data?.user?.email_confirmed_at)
-      console.log('ℹ️ Identities:', response.data?.user?.identities)
       setSuccess(true)
+    } catch (authError) {
+      setError(mapAuthError(authError))
+    } finally {
+      setLoading(false)
     }
-
-    setLoading(false)
   }
 
   const handleSignIn = async () => {
     setLoading(true)
     setError(null)
 
-    // Store current video ID in sessionStorage before signing in
-    if (currentVideoId) {
-      sessionStorage.setItem('pendingVideoId', currentVideoId)
-      console.log('Stored video for post-auth linking:', currentVideoId)
-    }
+    try {
+      if (currentVideoId) {
+        sessionStorage.setItem('pendingVideoId', currentVideoId)
+      }
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
 
-    if (error) {
-      setError(error.message)
-      toast.error(error.message)
-    } else {
+      if (error) {
+        throw error
+      }
+
       toast.success('Successfully signed in!')
       onSuccess?.()
       onOpenChange(false)
-      // Delay reload slightly to allow auth state to update
       setTimeout(() => {
         window.location.reload()
       }, 100)
+    } catch (authError) {
+      setError(mapAuthError(authError))
+    } finally {
+      setLoading(false)
     }
-
-    setLoading(false)
   }
 
   const handleGoogleSignIn = async () => {
     setLoading(true)
     setError(null)
 
-    // Store current video ID in sessionStorage before OAuth redirect
-    if (currentVideoId) {
-      sessionStorage.setItem('pendingVideoId', currentVideoId)
-      console.log('Stored video for post-auth linking:', currentVideoId)
+    try {
+      if (currentVideoId) {
+        sessionStorage.setItem('pendingVideoId', currentVideoId)
+      }
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${appUrl}/auth/callback`,
+        },
+      })
+
+      if (error) {
+        throw error
+      }
+    } catch (authError) {
+      setError(mapAuthError(authError))
+    } finally {
+      setLoading(false)
     }
-
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${appUrl}/auth/callback`,
-      },
-    })
-
-    if (error) {
-      setError(error.message)
-    }
-
-    setLoading(false)
   }
 
   const getModalContent = () => {
     switch (trigger) {
       case 'generation-limit':
         return {
-          title: 'Sign up to continue',
-          description: 'You\'ve used your free preview. Create a free account to unlock monthly credits.',
+          title: 'Sign in to analyze videos',
+          description: 'Use your saved AI model settings to generate Concept Maps for captioned videos.',
           benefits: [
-            '5 video analyses every 30 days',
-            'Save videos, notes, and highlights across devices',
-            'Upgrade anytime for 100 videos/month + Top-Up credits',
-          ],
-          showBenefitsCard: true,
-        }
-      case 'save-note':
-        return {
-          title: 'Sign in to save notes',
-          description: 'Capture key moments and keep your highlights in one place.',
-          benefits: [
-            'Save transcript snippets with one click',
-            'Organize notes across every video',
-            'Access your highlights from any device',
+            'Save an encrypted DeepSeek API key',
+            'Analyze YouTube and bilibili videos with captions',
+            'Jump from concepts back to source timestamps',
           ],
           showBenefitsCard: true,
         }
       default:
         return {
           title: 'Sign in to LongCut',
-          description: 'Create an account or sign in to save your video analyses and access them anytime.',
+          description: 'Create an account or sign in to configure your AI model and analyze videos.',
           benefits: [
-            'Save your analyzed videos',
-            'Access your video library from any device',
-            'Track your learning progress',
+            'Configure your own DeepSeek key',
+            'Generate Concept Maps from captions',
+            'Open source evidence timestamps',
           ],
           showBenefitsCard: false,
         }
@@ -197,7 +190,7 @@ export function AuthModal({ open, onOpenChange, onSuccess, trigger = 'manual', c
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Youtube className="h-5 w-5" />
+            <KeyRound className="h-5 w-5" />
             {title}
           </DialogTitle>
           <DialogDescription className="pt-2">
@@ -207,7 +200,7 @@ export function AuthModal({ open, onOpenChange, onSuccess, trigger = 'manual', c
 
         {showBenefitsCard && (
           <div className="bg-muted/50 rounded-lg p-4 space-y-2">
-            <p className="text-sm font-medium">What you get with a free account:</p>
+            <p className="text-sm font-medium">What your account enables:</p>
             <ul className="text-sm text-muted-foreground space-y-1">
               {benefits.map((benefit, index) => (
                 <li key={index} className="flex items-start gap-2">

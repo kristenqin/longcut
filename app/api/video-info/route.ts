@@ -4,6 +4,7 @@ import { withSecurity, SECURITY_PRESETS } from '@/lib/security-middleware';
 import { getMockVideoInfo, shouldUseMockVideoInfo } from '@/lib/mock-data';
 import { fetchYouTubeVideoInfo } from '@/lib/video-info-provider';
 import { resolvePlatformAdapter, type VideoMetadata } from '@/lib/platform';
+import { invalidJsonBodyResponse, isInvalidJsonBodyError, readJsonObject } from '@/lib/api-json';
 
 function serializeVideoInfo(metadata: VideoMetadata) {
   return {
@@ -29,9 +30,9 @@ function serializeVideoInfo(metadata: VideoMetadata) {
 
 async function handler(request: NextRequest) {
   try {
-    const { url } = await request.json();
+    const { url } = await readJsonObject(request);
 
-    if (!url) {
+    if (!url || typeof url !== 'string') {
       return NextResponse.json(
         { error: 'Video URL is required' },
         { status: 400 }
@@ -83,6 +84,10 @@ async function handler(request: NextRequest) {
     const metadata = await adapter.fetchMetadata(ref);
     return NextResponse.json(serializeVideoInfo(metadata));
   } catch (error) {
+    if (isInvalidJsonBodyError(error)) {
+      return invalidJsonBodyResponse();
+    }
+
     console.error('[VIDEO-INFO] Top-level error:', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined

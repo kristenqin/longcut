@@ -82,7 +82,6 @@ function summarizeErrorBody(body) {
       fallbackStatus: body.fallbackStatus,
       details: body.details,
       warnings: body.warnings,
-      noCreditsUsed: body.noCreditsUsed,
     },
     null,
     2

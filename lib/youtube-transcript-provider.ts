@@ -493,13 +493,11 @@ function shouldTryNextClient(error: TranscriptProviderError): boolean {
  *
  * @param videoId - The 11-character YouTube video ID
  * @param preferredLanguage - Optional language code (e.g., 'en', 'zh', 'ja')
- * @param expectedDuration - Optional expected video duration in seconds
  * @returns The transcript segments, language info, and available languages
  */
 export async function fetchYouTubeTranscript(
   videoId: string,
-  preferredLanguage?: string,
-  expectedDuration?: number
+  preferredLanguage?: string
 ): Promise<TranscriptFetchResult | null> {
   // Step 1: Scrape the watch page for InnerTube credentials
   // (needed by the Web client; Android/iOS have hardcoded keys)

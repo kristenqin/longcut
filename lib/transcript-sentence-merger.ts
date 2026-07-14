@@ -264,7 +264,7 @@ function findLatePunctuation(text: string): number {
 }
 
 /**
- * Merge transcript segments into complete sentences for better translation quality
+ * Merge transcript segments into complete sentences for better analysis quality.
  *
  * @param segments - Array of transcript segments
  * @returns Array of merged sentences with their segment indices

@@ -1,8 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
+import { withSecurity, SECURITY_PRESETS } from '@/lib/security-middleware'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 
-export async function POST() {
+async function handler() {
   const supabase = await createClient()
   
   // Sign out server-side
@@ -23,3 +24,5 @@ export async function POST() {
   
   return response
 }
+
+export const POST = withSecurity(handler, SECURITY_PRESETS.AUTHENTICATED)

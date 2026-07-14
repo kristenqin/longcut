@@ -1,78 +1,61 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { RightColumnTabs, type RightColumnTabsHandle } from "@/components/right-column-tabs";
-import { YouTubePlayer, type YouTubePlayerHandle } from "@/components/youtube-player";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useParams, useSearchParams } from "next/navigation";
+import { AlertCircle, Loader2, Play, RefreshCw } from "lucide-react";
+import { AuthModal } from "@/components/auth-modal";
 import { BilibiliPlayer } from "@/components/bilibili-player";
 import { ConceptMapPanel } from "@/components/concept-map-panel";
-import { HighlightsPanel } from "@/components/highlights-panel";
-import { ThemeSelector } from "@/components/theme-selector";
-import { LoadingContext } from "@/components/loading-context";
-import { LoadingTips } from "@/components/loading-tips";
-import { VideoSkeleton } from "@/components/video-skeleton";
-import Link from "next/link";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
-import { Topic, TranscriptSegment, VideoInfo, Citation, PlaybackCommand, Note, NoteSource, NoteMetadata, TopicCandidate, TopicGenerationMode, TranslationRequestHandler } from "@/lib/types";
-import { normalizeWhitespace } from "@/lib/quote-matcher";
-import { hydrateTopicsWithTranscript, normalizeTranscript } from "@/lib/topic-utils";
-import { SelectionActionPayload, EXPLAIN_SELECTION_EVENT } from "@/components/selection-actions";
-import { fetchNotes, saveNote } from "@/lib/notes-client";
-import { EditingNote } from "@/components/notes-panel";
-import { useModePreference } from "@/lib/hooks/use-mode-preference";
-import { useTranslation } from "@/lib/hooks/use-translation";
-import { useSubscription } from "@/lib/hooks/use-subscription";
-import { useTranscriptExport } from "@/lib/hooks/use-transcript-export";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { YouTubePlayer, type YouTubePlayerHandle } from "@/components/youtube-player";
+import { useAuth } from "@/contexts/auth-context";
+import { csrfFetch } from "@/lib/csrf-client";
+import { useElapsedTimer } from "@/lib/hooks/use-elapsed-timer";
+import type { ConceptMapAnalysis } from "@/lib/concept-map";
+import type { TranscriptSource, VideoRef } from "@/lib/platform";
+import type { PlaybackCommand, TranscriptSegment, VideoInfo } from "@/lib/types";
+import { extractSupportedVideoId, formatDuration } from "@/lib/utils";
 
-// Page state for better UX
-type PageState = 'IDLE' | 'ANALYZING_NEW' | 'LOADING_CACHED';
-type AuthModalTrigger = 'generation-limit' | 'save-video' | 'manual' | 'save-note';
-type CachedHighlightPayload = {
-  videoId: string;
-  videoDbId?: string | null;
-  topics: Topic[];
-  themes?: string[];
-  topicCandidates?: TopicCandidate[];
-};
+type PageState = "idle" | "loading" | "ready" | "error";
+
 type TranscriptMeta = {
   language?: string;
   availableLanguages?: string[];
   source?: TranscriptSource;
 };
-import { buildVideoSlug, extractSupportedVideoId } from "@/lib/utils";
-import { getLanguageName } from "@/lib/language-utils";
-import { NO_CREDITS_USED_MESSAGE } from "@/lib/no-credits-message";
-import { useElapsedTimer } from "@/lib/hooks/use-elapsed-timer";
-import { Loader2 } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import { AuthModal } from "@/components/auth-modal";
-import { TranscriptExportDialog } from "@/components/transcript-export-dialog";
-import { TranscriptExportUpsell } from "@/components/transcript-export-upsell";
-import { useAuth } from "@/contexts/auth-context";
-import { backgroundOperation, AbortManager } from "@/lib/promise-utils";
-import { csrfFetch } from "@/lib/csrf-client";
-import { toast } from "sonner";
-import { hasSpeakerMetadata } from "@/lib/transcript-export";
-import { buildSuggestedQuestionFallbacks } from "@/lib/suggested-question-fallback";
-import type { ConceptMapAnalysis } from "@/lib/concept-map";
-import type { TranscriptSource, VideoRef } from "@/lib/platform";
 
-const GUEST_LIMIT_MESSAGE = "You've used your free preview. Create a free account for 3 videos/month.";
-const AUTH_LIMIT_MESSAGE = "You've used all 3 free videos this month. Upgrade to Pro for 100 videos/month.";
-const DEFAULT_CLIENT_ERROR = "Something went wrong. Please try again.";
+type CachedConceptMapResponse = {
+  cached?: boolean;
+  transcript?: TranscriptSegment[];
+  videoInfo?: VideoInfo & {
+    platform?: string;
+    videoRef?: VideoRef;
+  };
+  videoRef?: VideoRef;
+  analysis?: ConceptMapAnalysis;
+  error?: string;
+};
 
-function parseClientFeatureFlag(raw: string | undefined): boolean {
-  if (!raw) return false;
-  const normalized = raw.trim().toLowerCase();
-  return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
-}
+type TranscriptResponse = {
+  transcript?: TranscriptSegment[];
+  language?: string;
+  availableLanguages?: string[];
+  source?: TranscriptSource;
+  videoRef?: VideoRef;
+  videoInfo?: VideoInfo & {
+    platform?: string;
+    videoRef?: VideoRef;
+  };
+  error?: string;
+  details?: string;
+};
 
-const optionalAnalysisFeatures = {
-  highlights: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_HIGHLIGHT_REELS),
-  chat: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_CHAT_PLUGIN),
-  notes: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_NOTES_PLUGIN),
-  transcriptExport: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_TRANSCRIPT_EXPORT),
-  quickPreview: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_QUICK_PREVIEW),
-  takeaways: parseClientFeatureFlag(process.env.NEXT_PUBLIC_ENABLE_TAKEAWAYS_PLUGIN),
+type VideoInfoResponse = VideoInfo & {
+  platform?: string;
+  videoRef?: VideoRef;
+  error?: string;
 };
 
 function buildDefaultVideoUrl(routeVideoId: string | null): string {
@@ -85,2172 +68,491 @@ function buildDefaultVideoUrl(routeVideoId: string | null): string {
   return `https://www.youtube.com/watch?v=${routeVideoId}`;
 }
 
-type LimitCheckResponse = {
-  canGenerate: boolean;
-  isAuthenticated: boolean;
-  tier?: 'free' | 'pro' | 'anonymous';
-  reason?: string | null;
-  requiresTopup?: boolean;
-  requiresAuth?: boolean;
-  status?: string | null;
-  warning?: string | null;
-  unlimited?: boolean;
-  willConsumeTopup?: boolean;
-  resetAt?: string | null;
-  usage?: {
-    totalRemaining?: number | null;
-    counted?: number | null;
-    cached?: number | null;
-    baseLimit?: number | null;
-    baseRemaining?: number | null;
-    topupRemaining?: number | null;
-  } | null;
-};
-
-
-function normalizeErrorMessage(message: string | undefined, fallback: string = DEFAULT_CLIENT_ERROR): string {
-  const trimmed = typeof message === "string" ? message.trim() : "";
-  const baseMessage = trimmed.length > 0 ? trimmed : fallback;
-  const normalizedSource = `${trimmed} ${baseMessage}`.toLowerCase();
-
-  // Only handle user abort - show actual API errors for transcript issues
-  if (normalizedSource.includes("user aborted request")) {
-    return "Request cancelled";
+function normalizeErrorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== "object") {
+    return fallback;
   }
 
-  return baseMessage;
+  const record = payload as Record<string, unknown>;
+  const error = typeof record.error === "string" ? record.error.trim() : "";
+  const details = typeof record.details === "string" ? record.details.trim() : "";
+
+  if (error && details) return `${error}: ${details}`;
+  return details || error || fallback;
 }
 
-function buildApiErrorMessage(errorData: unknown, fallback: string): string {
-  if (!errorData || typeof errorData !== "object") {
-    return normalizeErrorMessage(undefined, fallback);
-  }
+function normalizeTranscript(input: unknown): TranscriptSegment[] {
+  if (!Array.isArray(input)) return [];
 
-  const record = errorData as Record<string, unknown>;
-  const errorText =
-    typeof record.error === "string" && record.error.trim().length > 0
-      ? record.error.trim()
-      : "";
-  const detailsText =
-    typeof record.details === "string" && record.details.trim().length > 0
-      ? record.details.trim()
-      : "";
+  return input.flatMap((segment) => {
+    if (!segment || typeof segment !== "object") return [];
+    const record = segment as Record<string, unknown>;
+    const text = typeof record.text === "string" ? record.text.trim() : "";
+    const start = Number(record.start);
+    const duration = Number(record.duration);
 
-  const combinedMessage =
-    errorText && detailsText
-      ? `${errorText}: ${detailsText}`
-      : detailsText || errorText || undefined;
+    if (!text || !Number.isFinite(start)) return [];
 
-  const baseMessage = normalizeErrorMessage(combinedMessage, fallback);
-
-  const creditsMessage =
-    typeof record.creditsMessage === "string" && record.creditsMessage.trim().length > 0
-      ? record.creditsMessage.trim()
-      : record.noCreditsUsed
-        ? NO_CREDITS_USED_MESSAGE
-        : "";
-
-  if (!creditsMessage) {
-    return baseMessage;
-  }
-
-  const alreadyIncludes = baseMessage.toLowerCase().includes(creditsMessage.toLowerCase());
-  return alreadyIncludes ? baseMessage : `${baseMessage}\n${creditsMessage}`;
+    return [
+      {
+        text,
+        start: Math.max(0, start),
+        duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
+      },
+    ];
+  });
 }
 
-function parseDurationSeconds(raw: unknown): number | null {
-  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-  if (typeof raw === "string") {
-    const parsed = Number(raw);
-    if (!Number.isNaN(parsed) && Number.isFinite(parsed)) return parsed;
-  }
-  return null;
+function mergeVideoInfo(
+  routeVideoId: string,
+  info: Partial<VideoInfoResponse> | null | undefined,
+  fallback?: Partial<VideoInfoResponse> | null
+): VideoInfo {
+  const source = info && !info.error ? info : fallback;
+
+  return {
+    videoId: source?.videoId ?? source?.videoRef?.platformVideoId ?? routeVideoId,
+    title: source?.title ?? "Untitled video",
+    author: source?.author ?? "Unknown",
+    thumbnail: source?.thumbnail ?? "",
+    duration:
+      typeof source?.duration === "number" && Number.isFinite(source.duration)
+        ? source.duration
+        : null,
+    description: source?.description,
+    tags: source?.tags,
+    language: source?.language,
+    availableLanguages: source?.availableLanguages,
+  };
 }
 
-function isFlattenedTranscript(
-  transcript: TranscriptSegment[],
-  videoInfo?: VideoInfo | null,
-): boolean {
-  if (!Array.isArray(transcript) || transcript.length === 0) return false;
-  // If we already have several segments, it's probably fine
-  if (transcript.length > 3) return false;
+function transcriptEnd(segment: TranscriptSegment) {
+  return segment.start + Math.max(0, segment.duration || 0);
+}
 
-  const lastSegment = transcript[transcript.length - 1];
-  const transcriptDuration = lastSegment
-    ? lastSegment.start + (lastSegment.duration || 0)
-    : 0;
+function activeTranscriptWindow(transcript: TranscriptSegment[], currentTime: number) {
+  if (transcript.length === 0) return [];
 
-  const numericDuration = parseDurationSeconds(videoInfo?.duration);
-  const referenceDuration =
-    numericDuration && numericDuration > 0 ? numericDuration : transcriptDuration;
+  const activeIndex = transcript.findIndex((segment) => {
+    const end = transcriptEnd(segment);
+    return currentTime >= segment.start && currentTime <= end;
+  });
 
-  const totalWords = transcript.reduce((sum, seg) => {
-    const words = typeof seg.text === "string"
-      ? seg.text.trim().split(/\s+/).filter(Boolean).length
-      : 0;
-    return sum + words;
-  }, 0);
-
-  // Heuristic: very few segments that each cover nearly the whole video and a lot of text
-  return (
-    transcript.length <= 2 &&
-    referenceDuration > 120 &&
-    transcriptDuration >= referenceDuration * 0.9 &&
-    totalWords > 150
-  );
+  const center = activeIndex >= 0 ? activeIndex : 0;
+  return transcript.slice(Math.max(0, center - 4), center + 8);
 }
 
 export default function AnalyzePage() {
   const params = useParams<{ videoId: string }>();
-  const routeVideoId = Array.isArray(params?.videoId) ? params.videoId[0] : params?.videoId;
   const searchParams = useSearchParams();
-  const router = useRouter();
-  const urlParam = searchParams?.get('url');
-  const cachedParam = searchParams?.get('cached');
-  const cachedParamValue = cachedParam?.toLowerCase();
-  const isCachedQuery = cachedParamValue === 'true' || cachedParamValue === '1';
-  const regenParam = searchParams?.get('regen');
-  const forceRegenerate = (regenParam?.toLowerCase() === '1' || regenParam?.toLowerCase() === 'true');
-  const authErrorParam = searchParams?.get('auth_error');
-  const slugParam = searchParams?.get('slug') ?? null;
-  const [pageState, setPageState] = useState<PageState>(() =>
-    (routeVideoId || urlParam)
-      ? (isCachedQuery ? 'LOADING_CACHED' : 'ANALYZING_NEW')
-      : 'IDLE'
+  const { user, loading: authLoading } = useAuth();
+  const routeVideoId = Array.isArray(params?.videoId) ? params.videoId[0] : params?.videoId ?? null;
+  const urlParam = searchParams?.get("url") ?? "";
+  const forceRegenerate = searchParams?.get("regen") === "1" || searchParams?.get("regen") === "true";
+  const inputUrl = useMemo(
+    () => urlParam || buildDefaultVideoUrl(routeVideoId),
+    [routeVideoId, urlParam]
   );
-  const hasAttemptedLinking = useRef(false);
-  const [loadingStage, setLoadingStage] = useState<'fetching' | 'understanding' | null>(null);
-  const { mode, isLoading: isModeLoading } = useModePreference();
+
+  const youtubePlayerRef = useRef<YouTubePlayerHandle | null>(null);
+  const activeRequestRef = useRef<AbortController | null>(null);
+
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [pageState, setPageState] = useState<PageState>("idle");
+  const [loadingMessage, setLoadingMessage] = useState("Preparing video");
   const [error, setError] = useState("");
-  const [isRateLimitError, setIsRateLimitError] = useState(false);
-  const [videoId, setVideoId] = useState<string | null>(null);
-  // Database UUID for the video_analyses row — used to bypass youtube_id lookups
-  // when saving notes, which avoids 404 errors if the row wasn't persisted earlier.
-  const [videoDbId, setVideoDbId] = useState<string | null>(null);
+  const [videoRef, setVideoRef] = useState<VideoRef | null>(null);
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
-  const [currentVideoRef, setCurrentVideoRef] = useState<VideoRef | null>(null);
-  const [videoPreview, setVideoPreview] = useState<string>("");
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
   const [transcriptMeta, setTranscriptMeta] = useState<TranscriptMeta | null>(null);
-  const [topics, setTopics] = useState<Topic[]>([]);
-  const [baseTopics, setBaseTopics] = useState<Topic[]>([]);
-  const [themes, setThemes] = useState<string[]>([]);
-  const [selectedTheme, setSelectedTheme] = useState<string | null>(null);
-  const [themeTopicsMap, setThemeTopicsMap] = useState<Record<string, Topic[]>>({});
-  const [, setThemeCandidateMap] = useState<Record<string, TopicCandidate[]>>({});
-  const [usedTopicKeys, setUsedTopicKeys] = useState<Set<string>>(new Set());
-  const baseTopicKeySet = useMemo(() => {
-    const keys = new Set<string>();
-    baseTopics.forEach((topic) => {
-      if (topic.quote?.timestamp && topic.quote.text) {
-        keys.add(`${topic.quote.timestamp}|${normalizeWhitespace(topic.quote.text)}`);
-      }
-    });
-    return keys;
-  }, [baseTopics]);
-  const [isLoadingThemeTopics, setIsLoadingThemeTopics] = useState(false);
-  const [isGeneratingHighlights, setIsGeneratingHighlights] = useState(false);
-  const [highlightGenerationError, setHighlightGenerationError] = useState<string | null>(null);
-  const [highlightGenerationStartTime, setHighlightGenerationStartTime] = useState<number | null>(null);
   const [conceptMap, setConceptMap] = useState<ConceptMapAnalysis | null>(null);
   const [isGeneratingConceptMap, setIsGeneratingConceptMap] = useState(false);
   const [conceptMapError, setConceptMapError] = useState<string | null>(null);
   const [conceptMapGenerationStartTime, setConceptMapGenerationStartTime] = useState<number | null>(null);
-  const [themeError, setThemeError] = useState<string | null>(null);
-  const [switchingToLanguage, setSwitchingToLanguage] = useState<string | null>(null);
-  const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [videoDuration, setVideoDuration] = useState(0);
-  const [isShareReady, setIsShareReady] = useState(false);
-
-  // Centralized playback control state
   const [playbackCommand, setPlaybackCommand] = useState<PlaybackCommand | null>(null);
-  const [transcriptHeight, setTranscriptHeight] = useState<string>("auto");
-  const [citationHighlight, setCitationHighlight] = useState<Citation | null>(null);
-  const rightColumnTabsRef = useRef<RightColumnTabsHandle>(null);
-  const youtubePlayerRef = useRef<YouTubePlayerHandle | null>(null);
-  const abortManager = useRef(new AbortManager());
-  const cachedHighlightPayloadRef = useRef<CachedHighlightPayload | null>(null);
-  const selectedThemeRef = useRef<string | null>(null);
-  const seoPathRef = useRef<string | null>(null);
-  const nextThemeRequestIdRef = useRef(0);
-  const activeThemeRequestIdRef = useRef<number | null>(null);
-  const pendingThemeRequestsRef = useRef(new Map<string, number>());
+  const [currentTime, setCurrentTime] = useState(0);
+  const [bilibiliSeekTime, setBilibiliSeekTime] = useState<number | null>(null);
+  const conceptMapElapsedTime = useElapsedTimer(conceptMapGenerationStartTime);
 
-  // Play All state (lifted from YouTubePlayer)
-  const [isPlayingAll, setIsPlayingAll] = useState(false);
-  const [playAllIndex, setPlayAllIndex] = useState(0);
-
-  // Memoized setters for Play All state
-  const memoizedSetPlayAllIndex = useCallback((value: number | ((prev: number) => number)) => {
-    setPlayAllIndex(value);
-  }, []);
-
-  const memoizedSetIsPlayingAll = useCallback((value: boolean) => {
-    setIsPlayingAll(value);
-  }, []);
-
-  // Takeaways generation state
-  const [, setTakeawaysContent] = useState<string | null>(null);
-  const [, setIsGeneratingTakeaways] = useState<boolean>(false);
-  const [, setTakeawaysError] = useState<string>("");
-  const [showChatTab, setShowChatTab] = useState<boolean>(false);
-
-  // Cached suggested questions
-  const [cachedSuggestedQuestions, setCachedSuggestedQuestions] = useState<string[] | null>(null);
-
-  // Use custom hooks for translation
-  const {
-    selectedLanguage,
-    translationCache,
-    handleRequestTranslation,
-    handleBulkTranslation,
-    handleLanguageChange,
-  } = useTranslation();
-
-  // Create unified translation handler with videoInfo context
-  const translateWithContext: TranslationRequestHandler = useCallback(
-    (text: string, cacheKey: string, scenario?, targetLanguage?) => {
-      return handleRequestTranslation(text, cacheKey, scenario, videoInfo, targetLanguage);
-    },
-    [handleRequestTranslation, videoInfo]
+  const extractedVideo = useMemo(
+    () => (inputUrl ? extractSupportedVideoId(inputUrl) : null),
+    [inputUrl]
   );
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    if (!isShareReady) {
-      return;
-    }
-
-    const effectiveVideoId = routeVideoId || videoId;
-    if (!effectiveVideoId) {
-      return;
-    }
-
-    const normalizedSlugParam = slugParam?.trim() || null;
-    const fallbackTitle = videoInfo?.title || `YouTube Video ${effectiveVideoId}`;
-    const derivedSlug = normalizedSlugParam
-      ? normalizedSlugParam
-      : buildVideoSlug(fallbackTitle, effectiveVideoId);
-
-    if (!derivedSlug) {
-      return;
-    }
-
-    const targetPath = `/v/${derivedSlug}`;
-
-    if (seoPathRef.current === targetPath || window.location.pathname === targetPath) {
-      seoPathRef.current = targetPath;
-      return;
-    }
-
-    const newUrl = `${targetPath}${window.location.search}`;
-    window.history.replaceState(window.history.state, '', newUrl);
-    seoPathRef.current = targetPath;
-  }, [isShareReady, routeVideoId, videoId, videoInfo?.title, slugParam]);
-
-  // Use custom hook for timer logic
-  const highlightGenerationElapsedTime = useElapsedTimer(highlightGenerationStartTime);
-  const conceptMapGenerationElapsedTime = useElapsedTimer(conceptMapGenerationStartTime);
-
-  // Auth and generation limit state
-  const { user } = useAuth();
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [authModalTrigger, setAuthModalTrigger] = useState<AuthModalTrigger>('generation-limit');
-
-  // Store current video data in sessionStorage before auth
-  const storeCurrentVideoForAuth = useCallback((id?: string) => {
-    const targetVideoId = id ?? videoId;
-    if (targetVideoId && !user) {
-      try {
-        sessionStorage.setItem('pendingVideoId', targetVideoId);
-      } catch (error) {
-        console.error('Failed to persist pending video ID:', error);
-      }
-    }
-  }, [user, videoId]);
-
-  const handleAuthRequired = useCallback(() => {
-    storeCurrentVideoForAuth();
-    setAuthModalTrigger('manual');
-    setAuthModalOpen(true);
-  }, [storeCurrentVideoForAuth]);
-
-  // Use custom hook for subscription
-  const {
-    subscriptionStatus,
-    isCheckingSubscription,
-    fetchSubscriptionStatus,
-  } = useSubscription({
-    user,
-    onAuthRequired: handleAuthRequired,
-  });
-
-  // Ensure we fetch subscription status early so Pro users aren't blocked
-  useEffect(() => {
-    if (user && !subscriptionStatus && !isCheckingSubscription) {
-      fetchSubscriptionStatus().catch((err) => {
-        console.error('Failed to prefetch subscription status:', err);
-      });
-    }
-  }, [user, subscriptionStatus, isCheckingSubscription, fetchSubscriptionStatus]);
-
-  // Translation is available to all authenticated users (Free + Pro)
-
-  const hasSpeakerData = useMemo(() => hasSpeakerMetadata(transcript), [transcript]);
-
-  // Use custom hook for transcript export
-  const {
-    isExportDialogOpen,
-    exportFormat,
-    exportMode,
-    targetLanguage,
-    includeTimestamps,
-    includeSpeakers,
-    exportErrorMessage,
-    exportDisableMessage,
-    isExportingTranscript,
-    showExportUpsell,
-    exportButtonState,
-    translationProgress,
-    setExportFormat,
-    setExportMode,
-    setTargetLanguage,
-    setIncludeTimestamps,
-    setIncludeSpeakers,
-    setShowExportUpsell,
-    handleExportDialogOpenChange,
-    handleRequestExport,
-    handleConfirmExport,
-    handleUpgradeClick,
-  } = useTranscriptExport({
-    videoId,
-    transcript,
-    topics,
-    videoInfo,
-    user,
-    hasSpeakerData,
-    subscriptionStatus,
-    isCheckingSubscription,
-    fetchSubscriptionStatus,
-    onAuthRequired: handleAuthRequired,
-    onRequestTranslation: translateWithContext,
-    onBulkTranslation: handleBulkTranslation,
-    translationCache: translationCache,
-  });
-
-  const hasRedirectedForLimit = useRef(false);
-
-  // Centralized playback request functions
-  const requestSeek = useCallback((time: number) => {
-    if (youtubePlayerRef.current?.seekTo(time)) {
-      return;
-    }
-
-    setPlaybackCommand({ type: 'SEEK', time });
-  }, []);
-
-  const handleGenerateConceptMap = useCallback(async () => {
-    if (!videoId || transcript.length === 0 || isGeneratingConceptMap) {
-      return;
-    }
-
-    const requestKey = 'concept-map';
-    const controller = abortManager.current.createController(requestKey);
-    setConceptMapError(null);
-    setConceptMapGenerationStartTime(Date.now());
-    setIsGeneratingConceptMap(true);
-
-    try {
-      const response = await csrfFetch.post(
-        '/api/concept-map',
-        {
-          ...(currentVideoRef ? { videoRef: currentVideoRef } : { videoId }),
-          videoInfo,
-          transcript,
-          transcriptMeta: transcriptMeta ?? undefined,
-          maxConcepts: 6,
-        },
-        { signal: controller.signal }
-      );
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(buildApiErrorMessage(data, "Failed to generate Concept Map"));
-      }
-
-      setConceptMap(data.analysis ?? null);
-    } catch (error) {
-      const isAbortError =
-        typeof error === "object" &&
-        error !== null &&
-        "name" in error &&
-        (error as { name?: string }).name === "AbortError";
-
-      if (!isAbortError) {
-        setConceptMapError(
-          normalizeErrorMessage(
-            error instanceof Error ? error.message : undefined,
-            "Failed to generate Concept Map. Please try again."
-          )
-        );
-      }
-    } finally {
-      abortManager.current.cleanup(requestKey);
-      setConceptMapGenerationStartTime(null);
-      setIsGeneratingConceptMap(false);
-    }
-  }, [
-    videoId,
-    transcript,
-    isGeneratingConceptMap,
-    videoInfo,
-    currentVideoRef,
-    transcriptMeta,
-  ]);
-
-  const requestPlayTopic = useCallback((topic: Topic) => {
-    setPlaybackCommand({ type: 'PLAY_TOPIC', topic, autoPlay: true });
-  }, []);
-
-  const requestPlayAll = useCallback(() => {
-    if (topics.length === 0) return;
-    // Set Play All state first
-    setIsPlayingAll(true);
-    setPlayAllIndex(0);
-    setPlaybackCommand({ type: 'PLAY_ALL', autoPlay: true });
-  }, [topics]);
+  const currentVideoId = videoRef?.platformVideoId ?? extractedVideo?.videoId ?? routeVideoId ?? "";
+  const visibleTranscript = useMemo(
+    () => activeTranscriptWindow(transcript, currentTime),
+    [currentTime, transcript]
+  );
 
   const clearPlaybackCommand = useCallback(() => {
     setPlaybackCommand(null);
   }, []);
 
-  const promptSignInForNotes = useCallback(() => {
-    if (user) return;
-    storeCurrentVideoForAuth();
-    setAuthModalTrigger('save-note');
-    setAuthModalOpen(true);
-  }, [storeCurrentVideoForAuth, user, setAuthModalTrigger]);
-
-  const redirectToAuthForLimit = useCallback(
-    (message?: string, pendingVideoId?: string) => {
-      if (hasRedirectedForLimit.current) {
-        return;
-      }
-
-      hasRedirectedForLimit.current = true;
-
-      const trimmedMessage = typeof message === "string" && message.trim().length > 0
-        ? message.trim()
-        : GUEST_LIMIT_MESSAGE;
-
-      const targetVideoId = pendingVideoId ?? videoId ?? routeVideoId ?? null;
-      if (targetVideoId) {
-        storeCurrentVideoForAuth(targetVideoId);
-      }
-
-      if (trimmedMessage) {
-        try {
-          sessionStorage.setItem('limitRedirectMessage', trimmedMessage);
-        } catch (error) {
-          console.error('Failed to persist limit redirect message:', error);
-        }
-      }
-
-      router.push('/?auth=limit');
-    },
-    [routeVideoId, router, storeCurrentVideoForAuth, videoId]
-  );
-
-  // Check for pending video linking after auth
-  const checkPendingVideoLink = useCallback(async (retryCount = 0) => {
-    // Check both sessionStorage and current videoId state
-    const pendingVideoId = sessionStorage.getItem('pendingVideoId');
-    const currentVideoId = videoId;
-    const videoToLink = pendingVideoId || currentVideoId;
-
-    console.log('Checking for video to link:', {
-      pendingVideoId,
-      currentVideoId,
-      user: user?.email,
-      retryCount
-    });
-
-    if (videoToLink && user) {
-      console.log('Found video to link:', videoToLink);
-
-      // First, check if the video exists in the database
-      try {
-        // Construct YouTube URL from videoId for the cache check
-        const checkUrl = `https://www.youtube.com/watch?v=${videoToLink}`;
-        const checkResponse = await fetch('/api/check-video-cache', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: checkUrl })
-        });
-
-        if (!checkResponse.ok || !(await checkResponse.json()).cached) {
-          // Video doesn't exist yet, don't try to link
-          console.log('Video not yet in database, skipping link');
-          return;
-        }
-      } catch (error) {
-        console.error('Error checking video cache:', error);
-        return;
-      }
-
-      try {
-        const response = await fetch('/api/link-video', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoId: videoToLink })
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          console.log('Link video response:', data);
-          // Only show toast for newly linked videos, not already linked ones
-          if (!data.alreadyLinked) {
-            toast.success('Video saved to your library!');
-          }
-          sessionStorage.removeItem('pendingVideoId');
-        } else if (response.status === 404 && retryCount < 3) {
-          // Retry with exponential backoff if video not found
-          console.log(`Video not found, retrying in ${1000 * (retryCount + 1)}ms...`);
-          setTimeout(() => {
-            checkPendingVideoLink(retryCount + 1);
-          }, 1000 * (retryCount + 1));
-        } else if (response.status === 503 && retryCount < 2) {
-          // User profile not ready yet, retry after a short delay
-          console.log(`Profile not ready, retrying in ${2000 * (retryCount + 1)}ms...`);
-          setTimeout(() => {
-            checkPendingVideoLink(retryCount + 1);
-          }, 2000 * (retryCount + 1));
-        } else {
-          const errorText = await response.text().catch(() => 'Unknown error');
-          console.error('Failed to link video:', response.status, errorText);
-          // Don't remove pendingVideoId on error, so it can be retried later
-        }
-      } catch (error) {
-        console.error('Error linking video:', error);
-      }
+  const requestSeek = useCallback((time: number) => {
+    if (videoRef?.platform === "bilibili") {
+      setBilibiliSeekTime(time);
     }
-  }, [videoId, user]);
 
-  const checkRateLimit = useCallback(async (): Promise<LimitCheckResponse | null> => {
+    if (youtubePlayerRef.current?.seekTo(time)) {
+      return;
+    }
+
+    setPlaybackCommand({ type: "SEEK", time });
+    setCurrentTime(time);
+  }, [videoRef?.platform]);
+
+  const loadVideoWorkspace = useCallback(async () => {
+    if (!inputUrl || !routeVideoId) return;
+
+    const extracted = extractSupportedVideoId(inputUrl);
+    if (!extracted) {
+      setPageState("error");
+      setError("Enter a YouTube or bilibili video URL with captions.");
+      return;
+    }
+
+    activeRequestRef.current?.abort();
+    const controller = new AbortController();
+    activeRequestRef.current = controller;
+
+    setPageState("loading");
+    setLoadingMessage("Checking saved analysis");
+    setError("");
+    setVideoRef(null);
+    setVideoInfo(null);
+    setTranscript([]);
+    setTranscriptMeta(null);
+    setConceptMap(null);
+    setConceptMapError(null);
+    setCurrentTime(0);
+    setBilibiliSeekTime(null);
+
     try {
-      const response = await fetch('/api/check-limit');
-      const data: LimitCheckResponse = await response.json();
-
-      return data;
-    } catch (error) {
-      console.error('Error checking rate limit:', error);
-      return null;
-    }
-  }, []);
-
-  // Check rate limit status on mount
-  useEffect(() => {
-    checkRateLimit();
-  }, [checkRateLimit]);
-
-  // Handle pending video linking when user logs in and videoId is available
-  useEffect(() => {
-    if (user && !hasAttemptedLinking.current && (videoId || sessionStorage.getItem('pendingVideoId'))) {
-      hasAttemptedLinking.current = true;
-      // Delay the link attempt to ensure authentication is fully propagated
-      setTimeout(() => {
-        checkPendingVideoLink();
-      }, 1500);
-    }
-  }, [user, videoId, checkPendingVideoLink]);
-
-  // Cleanup AbortManager on component unmount
-  useEffect(() => {
-    const currentAbortManager = abortManager.current;
-    return () => {
-      // Abort all pending requests when component unmounts
-      currentAbortManager.cleanup();
-    };
-  }, []);
-
-  const lastInitializedKey = useRef<string | null>(null);
-  const normalizedUrl = urlParam ?? buildDefaultVideoUrl(routeVideoId);
-
-  // Clear auth errors from URL after notifying the user
-  useEffect(() => {
-    if (!authErrorParam || !routeVideoId) return;
-
-    toast.error(`Authentication failed: ${decodeURIComponent(authErrorParam)}`);
-
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete('auth_error');
-
-    const queryString = params.toString();
-    router.replace(
-      `/analyze/${routeVideoId}${queryString ? `?${queryString}` : ''}`,
-      { scroll: false }
-    );
-  }, [authErrorParam, router, routeVideoId, searchParams]);
-
-  const processVideo = useCallback(async (
-    url: string,
-    selectedMode: TopicGenerationMode,
-    preferredLanguage?: string
-  ) => {
-    try {
-      const extractedVideo = extractSupportedVideoId(url);
-      if (!extractedVideo) {
-        throw new Error("Invalid video URL");
-      }
-      const extractedVideoId = extractedVideo.videoId;
-
-      // Cleanup any pending requests from previous analysis
-      abortManager.current.cleanup();
-      pendingThemeRequestsRef.current.clear();
-      activeThemeRequestIdRef.current = null;
-      nextThemeRequestIdRef.current = 0;
-      selectedThemeRef.current = null;
-
-      setError("");
-      setIsRateLimitError(false);
-      setTopics([]);
-      setBaseTopics([]);
-      cachedHighlightPayloadRef.current = null;
-      setTranscript([]);
-      setTranscriptMeta(null);
-      setThemes([]);
-      setSelectedTheme(null);
-      setThemeTopicsMap({});
-      setThemeCandidateMap({});
-      setUsedTopicKeys(new Set());
-      setThemeError(null);
-      setIsLoadingThemeTopics(false);
-      setIsGeneratingHighlights(false);
-      setHighlightGenerationError(null);
-      setConceptMap(null);
-      setConceptMapError(null);
-      setIsGeneratingConceptMap(false);
-      setConceptMapGenerationStartTime(null);
-      setSelectedTopic(null);
-      setCurrentTime(0);
-      setVideoDuration(0);
-      setCitationHighlight(null);
-      setVideoInfo(null);
-      setCurrentVideoRef(null);
-      setVideoDbId(null);
-      setVideoPreview("");
-      setPlaybackCommand(null);
-      setIsPlayingAll(false);
-      setPlayAllIndex(0);
-      setIsShareReady(false);
-
-      // Reset takeaways-related states
-      setTakeawaysContent(null);
-      setTakeawaysError("");
-      setShowChatTab(false);
-
-      // Reset cached suggested questions
-      setCachedSuggestedQuestions(null);
-
-      // Store video ID immediately for potential post-auth linking
-      storeCurrentVideoForAuth(extractedVideoId);
-
-      // Only set videoId if it's different to prevent unnecessary re-renders
-      if (videoId !== extractedVideoId) {
-        setVideoId(extractedVideoId);
-      }
-
-      // Check cache first before fetching transcript/metadata unless forced regeneration
-      // Skip cache when a specific non-English language is requested (user wants a different native transcript)
-      const shouldSkipCacheForLanguage = preferredLanguage && preferredLanguage !== 'en';
-      
-      if (extractedVideo.platform === 'youtube' && !forceRegenerate && !shouldSkipCacheForLanguage) {
+      if (!forceRegenerate) {
         const cacheResponse = await fetch("/api/check-video-cache", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url })
+          body: JSON.stringify({ url: inputUrl }),
+          signal: controller.signal,
         });
+        const cacheData: CachedConceptMapResponse = await cacheResponse.json().catch(() => ({}));
 
-        if (cacheResponse.ok) {
-          const cacheData = await cacheResponse.json();
-
-          if (cacheData.cached) {
-            // Capture database UUID for notes saving
-            if (cacheData.videoDbId) {
-              setVideoDbId(cacheData.videoDbId);
-            }
-
-            const sanitizedTranscript = normalizeTranscript(cacheData.transcript);
-            const flattenedTranscript = isFlattenedTranscript(sanitizedTranscript, cacheData.videoInfo);
-
-            if (!flattenedTranscript) {
-              // For cached videos, we're already in LOADING_CACHED state if isCached was true
-              // Otherwise, set it now
-              setPageState('LOADING_CACHED');
-
-              // Load all cached data
-              setTranscript(sanitizedTranscript);
-              setTranscriptMeta({
-                language: cacheData.videoInfo?.language,
-                availableLanguages: cacheData.videoInfo?.availableLanguages,
-                source: 'unknown',
-              });
-              cachedHighlightPayloadRef.current =
-                Array.isArray(cacheData.topics) && cacheData.topics.length > 0
-                  ? {
-                    videoId: extractedVideoId,
-                    videoDbId: cacheData.videoDbId ?? null,
-                    topics: cacheData.topics,
-                    themes: Array.isArray(cacheData.themes) ? cacheData.themes : undefined,
-                    topicCandidates: Array.isArray(cacheData.topicCandidates) ? cacheData.topicCandidates : undefined,
-                  }
-                  : null;
-
-              const cachedVideoInfo = cacheData.videoInfo ?? null;
-              if (cachedVideoInfo) {
-                setVideoInfo(cachedVideoInfo);
-                const rawDuration = (cachedVideoInfo as { duration?: number | string | null }).duration;
-                const numericDuration =
-                  typeof rawDuration === "number"
-                    ? rawDuration
-                    : typeof rawDuration === "string"
-                      ? Number(rawDuration)
-                      : null;
-                if (numericDuration && !Number.isNaN(numericDuration) && numericDuration > 0) {
-                  setVideoDuration(numericDuration);
-                }
-              } else {
-                setVideoInfo(null);
-              }
-
-              // Optional plugin data can be restored from cache without driving the MVP flow.
-              if (optionalAnalysisFeatures.takeaways && cacheData.summary) {
-                setTakeawaysContent(cacheData.summary);
-                if (optionalAnalysisFeatures.chat) {
-                  setShowChatTab(true);
-                }
-                setIsGeneratingTakeaways(false);
-              }
-              if (optionalAnalysisFeatures.chat && cacheData.suggestedQuestions) {
-                setCachedSuggestedQuestions(cacheData.suggestedQuestions);
-              }
-
-              // Store video ID for potential post-auth linking (for cached videos)
-              storeCurrentVideoForAuth(extractedVideoId);
-
-              // Set page state back to idle
-              setPageState('IDLE');
-              setLoadingStage(null);
-              setSwitchingToLanguage(null);
-              setIsShareReady(true);
-
-              // Fetch available transcript languages for cached videos
-              // This enables the language selector dropdown to show all available native languages
-              // NOTE: Only update availableLanguages, preserve the cached language value
-              backgroundOperation(
-                'fetch-available-languages',
-                async () => {
-                  const langResponse = await fetch("/api/transcript", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ url, lang: 'en' }),
-                  });
-
-                  if (langResponse.ok) {
-                    const langData = await langResponse.json();
-                    const availableLanguages = langData.availableLanguages;
-                    
-                    if (availableLanguages) {
-                      setVideoInfo(prev => prev ? {
-                        ...prev,
-                        // Preserve the cached language - only update availableLanguages
-                        // If no cached language exists, use the API response as fallback
-                        language: prev.language ?? langData.language,
-                        availableLanguages: availableLanguages ?? prev.availableLanguages
-                      } : null);
-                    }
-                  }
-                },
-                (error) => {
-                  console.error("Failed to fetch available languages:", error);
-                }
-              );
-
-              if (optionalAnalysisFeatures.takeaways && !cacheData.summary) {
-                if (optionalAnalysisFeatures.chat) {
-                  setShowChatTab(true);
-                }
-                setIsGeneratingTakeaways(true);
-
-                backgroundOperation(
-                  'generate-cached-takeaways',
-                  async () => {
-                    const summaryRes = await fetch("/api/generate-summary", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        transcript: sanitizedTranscript,
-                        videoInfo: cacheData.videoInfo,
-                        videoId: extractedVideoId,
-                        targetLanguage: cacheData.videoInfo?.language
-                      }),
-                    });
-
-                    if (!summaryRes.ok) {
-                      const errorData = await summaryRes.json().catch(() => ({ error: "Unknown error" }));
-                      const message = buildApiErrorMessage(errorData, "Failed to generate takeaways");
-                      setTakeawaysError(message);
-                      return null;
-                    }
-
-                    const { summaryContent: generatedTakeaways } = await summaryRes.json();
-                    setTakeawaysContent(generatedTakeaways);
-
-                    // Update the video analysis with the takeaways (requires auth + ownership)
-                    await backgroundOperation(
-                      'update-cached-takeaways',
-                      async () => {
-                        const res = await csrfFetch.post("/api/update-video-analysis", {
-                          videoId: extractedVideoId,
-                          summary: generatedTakeaways
-                        });
-                        // 401/403 is expected for anonymous users or non-owners
-                        if (!res.ok && res.status !== 401 && res.status !== 403) {
-                          throw new Error('Failed to update takeaways');
-                        }
-                      }
-                    );
-                    return generatedTakeaways;
-                  },
-                  (error) => {
-                    setTakeawaysError(error.message || "Failed to generate takeaways. Please try again.");
-                  }
-                ).finally(() => {
-                  setIsGeneratingTakeaways(false);
-                });
-              }
-
-              return; // Exit early - no need to fetch anything else
-            } else {
-              console.warn("Cached transcript looks flattened; re-running full analysis.");
-            }
-          }
-        }
-      }
-
-      setPageState('ANALYZING_NEW');
-      setLoadingStage('fetching');
-
-      // Not cached, proceed with normal flow
-      // Create AbortControllers for both requests
-      const transcriptController = abortManager.current.createController('transcript', 300000);
-      const videoInfoController = abortManager.current.createController('videoInfo', 100000);
-
-      // Fetch transcript and video info in parallel
-      const transcriptPromise = fetch("/api/transcript", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, lang: preferredLanguage }),
-        signal: transcriptController.signal,
-      }).catch(err => {
-        if (err.name === 'AbortError') {
-          throw new Error("Transcript request timed out. Please try again.");
-        }
-        throw new Error("Network error: Unable to fetch transcript. Please ensure the server is running.");
-      });
-
-      const videoInfoPromise = fetch("/api/video-info", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-        signal: videoInfoController.signal,
-      }).catch(err => {
-        if (err.name === 'AbortError') {
-          console.error("Video info request timed out");
-          return null;
-        }
-        console.error("Failed to fetch video info:", err);
-        return null;
-      });
-
-      // Wait for both requests to complete
-      const [transcriptRes, videoInfoRes] = await Promise.all([
-        transcriptPromise,
-        videoInfoPromise
-      ]);
-
-      // AbortManager handles timeout cleanup automatically
-
-      // Process transcript response (required)
-      if (!transcriptRes || !transcriptRes.ok) {
-        const errorData = transcriptRes ? await transcriptRes.json().catch(() => ({ error: "Unknown error" })) : { error: "Failed to fetch transcript" };
-        const message = buildApiErrorMessage(errorData, "Failed to fetch transcript");
-        throw new Error(message);
-      }
-
-      let fetchedTranscript;
-      let language: string | undefined;
-      let availableLanguages: string[] | undefined;
-      let transcriptDuration: number | undefined;
-      let transcriptIsPartial: boolean | undefined;
-      let transcriptSource: TranscriptSource | undefined;
-      try {
-        const data = await transcriptRes.json();
-        fetchedTranscript = data.transcript;
-        language = data.language;
-        availableLanguages = data.availableLanguages;
-        transcriptDuration = data.transcriptDuration;
-        transcriptIsPartial = data.isPartial;
-        transcriptSource =
-          data.source === 'manual' ||
-          data.source === 'auto' ||
-          data.source === 'ai' ||
-          data.source === 'unknown'
-            ? data.source
-            : undefined;
-        if (data.videoRef) {
-          setCurrentVideoRef(data.videoRef);
-        }
-
-        // Log transcript metadata for debugging
-        if (transcriptDuration !== undefined) {
-          console.log('[Transcript] Metadata:', {
-            transcriptDuration,
-            segmentCount: data.segmentCount,
-            rawSegmentCount: data.rawSegmentCount,
-            isPartial: transcriptIsPartial,
-            coverageRatio: data.coverageRatio
+        if (cacheResponse.ok && cacheData.cached && cacheData.transcript && cacheData.videoInfo) {
+          const cachedTranscript = normalizeTranscript(cacheData.transcript);
+          setTranscript(cachedTranscript);
+          setVideoInfo(mergeVideoInfo(routeVideoId, cacheData.videoInfo));
+          setVideoRef(cacheData.videoInfo.videoRef ?? cacheData.videoRef ?? null);
+          setTranscriptMeta({
+            language: cacheData.videoInfo.language,
+            availableLanguages: cacheData.videoInfo.availableLanguages,
+            source: "unknown",
           });
-        }
-      } catch (jsonError) {
-        if (jsonError instanceof Error && jsonError.name === 'AbortError') {
-          throw new Error("Transcript processing timed out. The video may be too long. Please try again.");
-        }
-        throw new Error("Failed to process transcript data. Please try again.");
-      }
-
-      const normalizedTranscriptData = normalizeTranscript(fetchedTranscript);
-      setTranscript(normalizedTranscriptData);
-      setTranscriptMeta({
-        language,
-        availableLanguages,
-        source: transcriptSource ?? 'unknown',
-      });
-
-      // Process video info response (optional)
-      let fetchedVideoInfo: VideoInfo | null = null;
-      if (videoInfoRes && videoInfoRes.ok) {
-        try {
-          const videoInfoData = await videoInfoRes.json();
-          if (videoInfoData && !videoInfoData.error) {
-            fetchedVideoInfo = {
-              ...videoInfoData,
-              language,
-              availableLanguages,
-            };
-            if (videoInfoData.videoRef) {
-              setCurrentVideoRef(videoInfoData.videoRef);
-            }
-            setVideoInfo(fetchedVideoInfo);
-            const rawDuration = videoInfoData?.duration;
-            const numericDuration =
-              typeof rawDuration === "number"
-                ? rawDuration
-                : typeof rawDuration === "string"
-                  ? Number(rawDuration)
-                  : null;
-            if (numericDuration && !Number.isNaN(numericDuration) && numericDuration > 0) {
-              setVideoDuration(numericDuration);
-            }
-          }
-        } catch (error) {
-          console.error("Failed to parse video info:", error);
-        }
-      }
-      // If we didn't get video info from the separate endpoint, try to use what we have, but update the languages
-      if (!fetchedVideoInfo) {
-        setVideoInfo(prev => prev ? { ...prev, language, availableLanguages } : null);
-      }
-
-      // Check if transcript seems incomplete compared to video duration
-      if (transcriptDuration !== undefined && fetchedVideoInfo?.duration) {
-        const videoDuration = fetchedVideoInfo.duration;
-        const coverageRatio = transcriptDuration / videoDuration;
-        if (coverageRatio < 0.5) {
-          console.warn('[Transcript] WARNING: Transcript may be incomplete!', {
-            transcriptDuration: `${Math.round(transcriptDuration)}s (${Math.round(transcriptDuration / 60)}min)`,
-            videoDuration: `${videoDuration}s (${Math.round(videoDuration / 60)}min)`,
-            coverageRatio: `${Math.round(coverageRatio * 100)}%`,
-            message: 'The transcript covers less than 50% of the video duration. This may indicate an issue with caption availability.'
-          });
-        }
-      }
-
-      // Move to understanding stage
-      setLoadingStage('understanding');
-
-      if (optionalAnalysisFeatures.quickPreview) {
-        fetch("/api/quick-preview", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            transcript: normalizedTranscriptData,
-            videoTitle: fetchedVideoInfo?.title,
-            videoDescription: fetchedVideoInfo?.description,
-            channelName: fetchedVideoInfo?.author,
-            tags: fetchedVideoInfo?.tags,
-            language: fetchedVideoInfo?.language
-          }),
-        })
-          .then(res => {
-            if (!res.ok) {
-              console.error('Quick preview generation failed:', res.status);
-              return null;
-            }
-            return res.json();
-          })
-          .then(data => {
-            if (data && data.preview) {
-              console.log('Quick preview generated:', data.preview);
-              setVideoPreview(data.preview);
-            }
-          })
-          .catch((error) => {
-            console.error('Error generating quick preview:', error);
-          });
-      }
-
-      if (optionalAnalysisFeatures.takeaways) {
-        const takeawaysController = abortManager.current.createController('takeaways', 60000);
-
-        if (optionalAnalysisFeatures.chat) {
-          setShowChatTab(true);
-        }
-        setIsGeneratingTakeaways(true);
-        backgroundOperation(
-          'generate-takeaways',
-          async () => {
-            const summaryRes = await fetch("/api/generate-summary", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                transcript: normalizedTranscriptData,
-                videoInfo: fetchedVideoInfo,
-                videoId: extractedVideoId,
-                targetLanguage: fetchedVideoInfo?.language
-              }),
-              signal: takeawaysController.signal,
-            });
-
-            if (!summaryRes.ok) {
-              const errorData = await summaryRes.json().catch(() => ({ error: "Unknown error" }));
-              setTakeawaysError(buildApiErrorMessage(errorData, "Failed to generate takeaways. Please try again."));
-              return null;
-            }
-
-            const summaryData = await summaryRes.json();
-            const generatedTakeaways = summaryData.summaryContent;
-            setTakeawaysContent(generatedTakeaways);
-
-            await backgroundOperation(
-              'update-takeaways',
-              async () => {
-                const updateRes = await csrfFetch.post("/api/update-video-analysis", {
-                  videoId: extractedVideoId,
-                  summary: generatedTakeaways
-                });
-
-                if (!updateRes.ok && updateRes.status !== 404 && updateRes.status !== 401 && updateRes.status !== 403) {
-                  throw new Error('Failed to update takeaways');
-                }
-              }
-            );
-
-            return generatedTakeaways;
-          },
-          (error) => {
-            const isAbortError =
-              typeof error === "object" &&
-              error !== null &&
-              "name" in error &&
-              (error as { name?: string }).name === "AbortError";
-
-            if (!isAbortError) {
-              setTakeawaysError(error.message || "Failed to generate takeaways. Please try again.");
-            }
-          }
-        ).finally(() => {
-          abortManager.current.cleanup('takeaways');
-          setIsGeneratingTakeaways(false);
-        });
-      }
-
-    } catch (err) {
-      setError(
-        normalizeErrorMessage(
-          err instanceof Error ? err.message : undefined,
-          "An error occurred"
-        )
-      );
-    } finally {
-      setPageState('IDLE');
-      setLoadingStage(null);
-      setSwitchingToLanguage(null);
-    }
-  }, [
-    storeCurrentVideoForAuth,
-    videoId,
-    forceRegenerate
-  ]);
-
-  useEffect(() => {
-    if (!routeVideoId || isModeLoading) return;
-
-    const key = `${routeVideoId}|${urlParam ?? ''}|${cachedParam ?? ''}|${mode}`;
-    if (lastInitializedKey.current === key) return;
-
-    lastInitializedKey.current = key;
-
-    // Store video ID for potential post-auth linking before loading
-    if (!user) {
-      sessionStorage.setItem('pendingVideoId', routeVideoId);
-      console.log('Stored route video ID for potential post-auth linking:', routeVideoId);
-    }
-
-    processVideo(normalizedUrl, mode);
-  }, [routeVideoId, urlParam, cachedParam, user, normalizedUrl, isModeLoading, mode, processVideo]);
-
-  const handleCitationClick = (citation: Citation) => {
-    // Reset Play All mode when clicking a citation
-    setIsPlayingAll(false);
-    setPlayAllIndex(0);
-
-    setSelectedTopic(null);
-    setCitationHighlight(citation);
-
-    const videoContainer = document.getElementById("video-container");
-    if (videoContainer) {
-      videoContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-
-    // Request seek through centralized command system
-    requestSeek(citation.start);
-  };
-
-  const handleTimestampClick = (seconds: number, _endSeconds?: number, isCitation: boolean = false, _citationText?: string, isWithinHighlightReel: boolean = false, isWithinCitationHighlight: boolean = false) => {
-    // Reset Play All mode when clicking any timestamp
-    setIsPlayingAll(false);
-    setPlayAllIndex(0);
-
-    // Handle topic selection clearing:
-    // Clear topic if it's a new citation click from AI chat OR
-    // if clicking outside the current highlight reel (and not within a citation)
-    if (isCitation || (!isWithinHighlightReel && !isWithinCitationHighlight)) {
-      setSelectedTopic(null);
-    }
-
-    // Clear citation highlight for non-citation clicks
-    if (!isCitation) {
-      setCitationHighlight(null);
-    }
-
-    // Scroll to video player
-    const videoContainer = document.getElementById("video-container");
-    if (videoContainer) {
-      videoContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-
-    // Request seek through centralized command system
-    requestSeek(seconds);
-  };
-
-  const handleTimeUpdate = useCallback((seconds: number) => {
-    setCurrentTime(seconds);
-  }, []);
-
-  const handleTopicSelect = useCallback((topic: Topic | null, fromPlayAll: boolean = false) => {
-    // Reset Play All mode only when manually selecting a topic (not from Play All)
-    if (!fromPlayAll && isPlayingAll) {
-      setIsPlayingAll(false);
-      setPlayAllIndex(0);
-    }
-
-    // Clear citation highlight when selecting a topic
-    setCitationHighlight(null);
-    setSelectedTopic(topic);
-
-    // Request to play the topic through centralized command system
-    if (topic && !fromPlayAll) {
-      requestPlayTopic(topic);
-    }
-  }, [isPlayingAll, requestPlayTopic]);
-
-  const handleTogglePlayAll = useCallback(() => {
-    if (isPlayingAll) {
-      // Stop playing all
-      setIsPlayingAll(false);
-      setPlayAllIndex(0);
-      setPlaybackCommand({ type: 'PAUSE' });
-    } else {
-      // Clear any existing selection to start fresh
-      setSelectedTopic(null);
-      // Request to play all topics through centralized command system
-      requestPlayAll();
-    }
-  }, [isPlayingAll, requestPlayAll]);
-
-  const applyHighlightResponse = useCallback((
-    topicsData: any,
-    sourceTranscript: TranscriptSegment[]
-  ): Topic[] => {
-    const rawTopics = Array.isArray(topicsData.topics) ? topicsData.topics : [];
-    const generatedTopics: Topic[] = hydrateTopicsWithTranscript(rawTopics, sourceTranscript);
-    const generatedThemes: string[] = Array.isArray(topicsData.themes) ? topicsData.themes : [];
-    const rawCandidates: TopicCandidate[] = Array.isArray(topicsData.topicCandidates) ? topicsData.topicCandidates : [];
-    const generatedCandidates: TopicCandidate[] = rawCandidates.map(candidate => ({
-      ...candidate,
-      key: `${candidate.quote.timestamp}|${normalizeWhitespace(candidate.quote.text)}`
-    }));
-
-    if (topicsData.videoDbId) {
-      setVideoDbId(topicsData.videoDbId);
-    }
-
-    setTopics(generatedTopics);
-    setBaseTopics(generatedTopics);
-
-    const initialKeys = new Set<string>();
-    generatedTopics.forEach(topic => {
-      if (topic.quote?.timestamp && topic.quote.text) {
-        initialKeys.add(`${topic.quote.timestamp}|${normalizeWhitespace(topic.quote.text)}`);
-      }
-    });
-    setUsedTopicKeys(initialKeys);
-    setThemeCandidateMap(prev => ({
-      ...prev,
-      __default: generatedCandidates
-    }));
-    setSelectedTopic(null);
-    setThemes(generatedThemes);
-
-    return generatedTopics;
-  }, []);
-
-  const generateSuggestedQuestionsForTopics = useCallback((
-    generatedTopics: Topic[],
-    sourceTranscript: TranscriptSegment[],
-    sourceVideoInfo: VideoInfo | null
-  ) => {
-    if (!optionalAnalysisFeatures.chat || !videoId) return;
-
-    backgroundOperation(
-      'generate-questions',
-      async () => {
-        const res = await fetch("/api/suggested-questions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            transcript: sourceTranscript,
-            topics: generatedTopics,
-            videoTitle: sourceVideoInfo?.title,
-            language: sourceVideoInfo?.language
-          }),
-        });
-
-        const applyCachedQuestions = (questions: string[]) => {
-          if (questions.length === 0) {
-            return questions;
-          }
-          setCachedSuggestedQuestions(prev => {
-            if (prev && prev.length > 0) {
-              return prev;
-            }
-            return questions;
-          });
-          return questions;
-        };
-
-        if (!res.ok) {
-          console.error("Failed to generate suggested questions:", res.status, res.statusText);
-          return applyCachedQuestions(buildSuggestedQuestionFallbacks(3));
-        }
-
-        let parsed: unknown;
-        try {
-          parsed = await res.json();
-        } catch (error) {
-          console.error("Failed to parse suggested questions payload:", error);
-          return applyCachedQuestions(buildSuggestedQuestionFallbacks(3));
-        }
-
-        const questions = Array.isArray((parsed as any)?.questions)
-          ? (parsed as any).questions
-            .filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
-            .map((item: string) => item.trim())
-          : [];
-
-        const normalizedQuestions = questions.length > 0
-          ? questions.slice(0, 3)
-          : buildSuggestedQuestionFallbacks(3);
-
-        applyCachedQuestions(normalizedQuestions);
-
-        await backgroundOperation(
-          'update-questions',
-          async () => {
-            const updateRes = await csrfFetch.post("/api/update-video-analysis", {
-              videoId,
-              suggestedQuestions: normalizedQuestions
-            });
-
-            if (!updateRes.ok && updateRes.status !== 404 && updateRes.status !== 401 && updateRes.status !== 403) {
-              throw new Error('Failed to update suggested questions');
-            }
-          }
-        );
-
-        return normalizedQuestions;
-      },
-      (error) => {
-        console.error("Failed to generate suggested questions:", error);
-      }
-    );
-  }, [videoId]);
-
-  const confirmShareReady = useCallback((url: string) => {
-    backgroundOperation(
-      'confirm-share-ready',
-      async () => {
-        if (!url) return false;
-
-        const cacheCheck = await fetch("/api/check-video-cache", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url })
-        });
-
-        if (!cacheCheck.ok) {
-          return false;
-        }
-
-        const cacheData = await cacheCheck.json();
-        if (cacheData?.cached) {
-          setIsShareReady(true);
-          return true;
-        }
-
-        return false;
-      },
-      (error) => {
-        console.error("Failed to confirm cached analysis for sharing:", error);
-      }
-    );
-  }, []);
-
-  const handleGenerateHighlights = useCallback(async () => {
-    if (!videoId || transcript.length === 0 || isGeneratingHighlights) {
-      return;
-    }
-
-    const cachedHighlightPayload = cachedHighlightPayloadRef.current;
-    if (
-      !forceRegenerate &&
-      cachedHighlightPayload?.videoId === videoId &&
-      Array.isArray(cachedHighlightPayload.topics) &&
-      cachedHighlightPayload.topics.length > 0
-    ) {
-      setHighlightGenerationError(null);
-      setIsRateLimitError(false);
-      const generatedTopics = applyHighlightResponse(cachedHighlightPayload, transcript);
-      cachedHighlightPayloadRef.current = null;
-      if (!cachedSuggestedQuestions?.length) {
-        generateSuggestedQuestionsForTopics(generatedTopics, transcript, videoInfo);
-      }
-      return;
-    }
-
-    const requestKey = 'highlights';
-    const controller = abortManager.current.createController(requestKey);
-    setHighlightGenerationError(null);
-    setHighlightGenerationStartTime(Date.now());
-    setIsGeneratingHighlights(true);
-    setIsRateLimitError(false);
-
-    try {
-      const response = await fetch("/api/video-analysis", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          videoId,
-          videoInfo,
-          transcript,
-          includeCandidatePool: true,
-          mode,
-          forceRegenerate
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
-        const requiresAuth = Boolean((errorData as any)?.requiresAuth);
-        const authMessage =
-          typeof (errorData as any)?.message === "string"
-            ? (errorData as any).message
-            : undefined;
-
-        if (requiresAuth || response.status === 401 || response.status === 403) {
-          redirectToAuthForLimit(authMessage, videoId);
+          setConceptMap(cacheData.analysis ?? null);
+          setPageState("ready");
           return;
         }
-
-        if (response.status === 429) {
-          setIsRateLimitError(true);
-          checkRateLimit();
-        }
-
-        throw new Error(buildApiErrorMessage(errorData, "Failed to generate highlight reels"));
       }
 
-      const topicsData = await response.json();
-      const generatedTopics = applyHighlightResponse(topicsData, transcript);
-      checkRateLimit();
-      confirmShareReady(normalizedUrl);
-      generateSuggestedQuestionsForTopics(generatedTopics, transcript, videoInfo);
-    } catch (error) {
-      const isAbortError =
-        typeof error === "object" &&
-        error !== null &&
-        "name" in error &&
-        (error as { name?: string }).name === "AbortError";
+      setLoadingMessage("Fetching transcript and video information");
 
-      if (!isAbortError) {
-        setHighlightGenerationError(
+      const [transcriptResponse, videoInfoResponse] = await Promise.all([
+        fetch("/api/transcript", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: inputUrl }),
+          signal: controller.signal,
+        }),
+        fetch("/api/video-info", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: inputUrl }),
+          signal: controller.signal,
+        }),
+      ]);
+
+      const transcriptPayload: TranscriptResponse = await transcriptResponse.json().catch(() => ({}));
+      const videoInfoPayload: VideoInfoResponse = await videoInfoResponse.json().catch(() => ({} as VideoInfoResponse));
+
+      if (!transcriptResponse.ok) {
+        throw new Error(
           normalizeErrorMessage(
-            error instanceof Error ? error.message : undefined,
-            "Failed to generate highlight reels. Please try again."
+            transcriptPayload,
+            "No transcript available. Use a YouTube or bilibili video with captions."
           )
         );
       }
-    } finally {
-      abortManager.current.cleanup(requestKey);
-      setHighlightGenerationStartTime(null);
-      setIsGeneratingHighlights(false);
-    }
-  }, [
-    videoId,
-    transcript,
-    isGeneratingHighlights,
-    videoInfo,
-    mode,
-    forceRegenerate,
-    cachedSuggestedQuestions,
-    redirectToAuthForLimit,
-    checkRateLimit,
-    applyHighlightResponse,
-    confirmShareReady,
-    normalizedUrl,
-    generateSuggestedQuestionsForTopics
-  ]);
 
-  useEffect(() => {
-    selectedThemeRef.current = selectedTheme;
-  }, [selectedTheme]);
-
-  const handleThemeSelect = useCallback(async (themeLabel: string | null) => {
-    if (!videoId) return;
-
-    const resetToDefault = (options?: { preserveError?: boolean }) => {
-      if (!options?.preserveError) {
-        setThemeError(null);
+      const nextTranscript = normalizeTranscript(transcriptPayload.transcript);
+      if (nextTranscript.length === 0) {
+        throw new Error("No transcript available. Use a YouTube or bilibili video with captions.");
       }
-      setSelectedTheme(null);
-      selectedThemeRef.current = null;
-      setTopics(baseTopics);
-      setSelectedTopic(null);
-      setIsPlayingAll(false);
-      setPlayAllIndex(0);
-      setIsLoadingThemeTopics(false);
-      activeThemeRequestIdRef.current = null;
-      setUsedTopicKeys(new Set(baseTopicKeySet));
-    };
 
-    if (!themeLabel) {
-      resetToDefault();
-      return;
-    }
+      const nextVideoInfo = mergeVideoInfo(
+        routeVideoId,
+        videoInfoResponse.ok ? videoInfoPayload : null,
+        transcriptPayload.videoInfo
+      );
 
-    const normalizedTheme = themeLabel.trim();
-
-    if (!normalizedTheme) {
-      resetToDefault();
-      return;
-    }
-
-    if (selectedTheme === normalizedTheme) {
-      resetToDefault();
-      return;
-    }
-
-    let themedTopics = themeTopicsMap[normalizedTheme];
-    const needsHydration =
-      Array.isArray(themedTopics) &&
-      themedTopics.some((topic) => {
-        const firstSegment = Array.isArray(topic?.segments) ? topic.segments[0] : null;
-        return !firstSegment || typeof firstSegment.start !== 'number' || typeof firstSegment.end !== 'number';
+      setTranscript(nextTranscript);
+      setVideoInfo(nextVideoInfo);
+      setVideoRef(videoInfoPayload.videoRef ?? transcriptPayload.videoRef ?? transcriptPayload.videoInfo?.videoRef ?? {
+        platform: extracted.platform,
+        platformVideoId: extracted.videoId,
+        canonicalUrl: inputUrl,
+        platformPartId: null,
       });
-
-    if (themedTopics && needsHydration) {
-      themedTopics = hydrateTopicsWithTranscript(themedTopics, transcript);
-      setThemeTopicsMap(prev => ({
-        ...prev,
-        [normalizedTheme]: themedTopics || [],
-      }));
-    }
-
-    setSelectedTheme(normalizedTheme);
-    selectedThemeRef.current = normalizedTheme;
-    setThemeError(null);
-    setSelectedTopic(null);
-    setIsPlayingAll(false);
-    setPlayAllIndex(0);
-
-    const pendingRequestId = pendingThemeRequestsRef.current.get(normalizedTheme);
-
-    if (!themedTopics && typeof pendingRequestId === "number") {
-      activeThemeRequestIdRef.current = pendingRequestId;
-      setIsLoadingThemeTopics(true);
-      return;
-    }
-
-    if (!themedTopics) {
-      const requestId = ++nextThemeRequestIdRef.current;
-      pendingThemeRequestsRef.current.set(normalizedTheme, requestId);
-      activeThemeRequestIdRef.current = requestId;
-      setIsLoadingThemeTopics(true);
-      const requestKey = `theme-topics:${normalizedTheme}:${requestId}`;
-      const controller = abortManager.current.createController(requestKey);
-      const exclusionKeys = Array.from(baseTopicKeySet).map((key) => key.slice(0, 500));
-
-      try {
-        const response = await fetch("/api/video-analysis", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            videoId,
-            videoInfo,
-            transcript,
-            theme: normalizedTheme,
-            excludeTopicKeys: exclusionKeys,
-            mode
-          }),
-          signal: controller.signal
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
-          const message = buildApiErrorMessage(errorData, "Failed to generate themed topics");
-          throw new Error(message);
-        }
-
-        const data = await response.json();
-
-        // Check if the API returned an error (e.g., no content found for theme)
-        if (data.error) {
-          throw new Error(data.error);
-        }
-
-        const hydratedThemeTopics = hydrateTopicsWithTranscript(Array.isArray(data.topics) ? data.topics : [], transcript);
-        const candidatePool = Array.isArray(data.topicCandidates) ? data.topicCandidates : undefined;
-        setThemeCandidateMap(prev => ({
-          ...prev,
-          [normalizedTheme]: candidatePool ?? []
-        }));
-        const nextUsedKeys = new Set(usedTopicKeys);
-        hydratedThemeTopics.forEach(topic => {
-          if (topic.quote?.timestamp && topic.quote.text) {
-            nextUsedKeys.add(`${topic.quote.timestamp}|${normalizeWhitespace(topic.quote.text)}`);
-          }
-        });
-        setUsedTopicKeys(nextUsedKeys);
-        themedTopics = hydratedThemeTopics;
-        setThemeTopicsMap(prev => ({
-          ...prev,
-          [normalizedTheme]: themedTopics || []
-        }));
-      } catch (error) {
-        const isAbortError =
-          typeof error === "object" &&
-          error !== null &&
-          "name" in error &&
-          (error as { name?: string }).name === "AbortError";
-
-        if (isAbortError) {
-          return;
-        }
-
-        const message = error instanceof Error ? error.message : "Failed to generate themed topics";
-        console.error("Theme-specific generation failed:", error);
-        if (selectedThemeRef.current === normalizedTheme) {
-          resetToDefault({ preserveError: true });
-          setThemeError(message);
-        }
+      setTranscriptMeta({
+        language: transcriptPayload.language ?? nextVideoInfo.language,
+        availableLanguages: transcriptPayload.availableLanguages ?? nextVideoInfo.availableLanguages,
+        source: transcriptPayload.source ?? "unknown",
+      });
+      setPageState("ready");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
         return;
-      } finally {
-        abortManager.current.cleanup(requestKey);
-        pendingThemeRequestsRef.current.delete(normalizedTheme);
-        if (
-          activeThemeRequestIdRef.current === requestId &&
-          selectedThemeRef.current === normalizedTheme
-        ) {
-          setIsLoadingThemeTopics(false);
-          activeThemeRequestIdRef.current = null;
-        }
-      }
-    } else {
-      activeThemeRequestIdRef.current = null;
-      setIsLoadingThemeTopics(false);
-    }
-
-    if (!themedTopics) {
-      themedTopics = [];
-    }
-
-    if (themedTopics.length === 0) {
-      setThemeCandidateMap(prev => ({
-        ...prev,
-        [normalizedTheme]: prev[normalizedTheme] ?? []
-      }));
-    }
-
-    if (selectedThemeRef.current !== normalizedTheme) {
-      return;
-    }
-
-    setTopics(themedTopics);
-    if (themedTopics.length > 0) {
-      setSelectedTopic(themedTopics[0]);
-      setThemeError(null);
-    } else {
-      setThemeError("No highlights available for this theme yet.");
-      setSelectedTopic(null);
-    }
-  }, [
-    videoId,
-    videoInfo,
-    transcript,
-    selectedTheme,
-    baseTopics,
-    baseTopicKeySet,
-    themeTopicsMap,
-    usedTopicKeys,
-    mode,
-    setIsPlayingAll,
-    setPlayAllIndex
-  ]);
-
-  // Dynamically adjust right column height to match video container
-  useEffect(() => {
-    let animationFrameId: number | null = null;
-
-    const adjustRightColumnHeight = () => {
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
       }
 
-      animationFrameId = requestAnimationFrame(() => {
-        const videoContainer = document.getElementById("video-container");
-        const rightColumnContainer = document.getElementById("right-column-container");
-
-        if (videoContainer && rightColumnContainer) {
-          const videoHeight = videoContainer.offsetHeight;
-          setTranscriptHeight(`${Math.max(videoHeight, 420)}px`);
-        }
-      });
-    };
-
-    // Initial adjustment
-    adjustRightColumnHeight();
-
-    // Adjust on window resize
-    window.addEventListener("resize", adjustRightColumnHeight);
-
-    // Also observe video container for size changes
-    const resizeObserver = new ResizeObserver(adjustRightColumnHeight);
-    const videoContainer = document.getElementById("video-container");
-    if (videoContainer) {
-      resizeObserver.observe(videoContainer);
+      console.error("Failed to load video workspace:", error);
+      setError(error instanceof Error ? error.message : "Failed to load video workspace");
+      setPageState("error");
     }
+  }, [forceRegenerate, inputUrl, routeVideoId]);
 
-    return () => {
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
-      }
-      window.removeEventListener("resize", adjustRightColumnHeight);
-      resizeObserver.disconnect();
-    };
-  }, [videoId, transcript.length, pageState]); // Re-run when the workspace first mounts or changes videos
-
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [, setIsLoadingNotes] = useState(false);
-  const [editingNote, setEditingNote] = useState<EditingNote | null>(null);
-
-  useEffect(() => {
-    if (!optionalAnalysisFeatures.notes || !videoId || !user) {
-      setNotes([]);
+  const handleGenerateConceptMap = useCallback(async () => {
+    if (!currentVideoId || !videoInfo || !videoRef || transcript.length === 0 || isGeneratingConceptMap) {
       return;
     }
 
-    setIsLoadingNotes(true);
-    fetchNotes({ youtubeId: videoId })
-      .then(setNotes)
-      .catch((error) => {
-        console.error("Failed to load notes", error);
-      })
-      .finally(() => setIsLoadingNotes(false));
-  }, [videoId, user]);
-
-  // Auto-switch to Chat tab when Explain is triggered from transcript
-  useEffect(() => {
-    if (!optionalAnalysisFeatures.chat) {
-      return;
-    }
-
-    const handleExplainFromSelection = () => {
-      // Switch to chat tab when explain is triggered
-      rightColumnTabsRef.current?.switchToChat?.();
-    };
-
-    window.addEventListener(EXPLAIN_SELECTION_EVENT, handleExplainFromSelection as EventListener);
-    return () => {
-      window.removeEventListener(EXPLAIN_SELECTION_EVENT, handleExplainFromSelection as EventListener);
-    };
-  }, []);
-
-  const handleSaveNote = useCallback(async ({ text, source, sourceId, metadata }: { text: string; source: NoteSource; sourceId?: string | null; metadata?: NoteMetadata | null }) => {
-    if (!videoId) return;
-    if (!user) {
-      promptSignInForNotes();
-      return;
-    }
+    setConceptMapError(null);
+    setConceptMapGenerationStartTime(Date.now());
+    setIsGeneratingConceptMap(true);
 
     try {
-      const note = await saveNote({
-        youtubeId: videoId,
-        // Pass the database UUID directly so the notes API doesn't have to
-        // look it up by youtube_id — which fails if the video_analyses row
-        // wasn't persisted (e.g. FK error during initial save).
-        videoId: videoDbId ?? undefined,
-        source,
-        sourceId: sourceId ?? undefined,
-        text,
-        metadata: metadata ?? undefined,
+      const response = await csrfFetch.post("/api/concept-map", {
+        videoRef,
+        videoInfo,
+        transcript,
+        transcriptMeta: transcriptMeta ?? undefined,
+        maxConcepts: 8,
       });
-      setNotes((prev) => [note, ...prev]);
-      toast.success("Note saved");
-    } catch (error) {
-      console.error("Failed to save note", error);
-      toast.error("Failed to save note");
-    }
-  }, [videoId, videoDbId, user, promptSignInForNotes]);
+      const payload = await response.json().catch(() => ({}));
 
-  const handleTakeNoteFromSelection = useCallback((payload: SelectionActionPayload) => {
-    if (!user) {
-      promptSignInForNotes();
-      return;
-    }
-
-    // Switch to notes tab
-    rightColumnTabsRef.current?.switchToNotes();
-
-    // Set editing state with selected text, metadata, and source
-    setEditingNote({
-      text: payload.text,
-      metadata: payload.metadata ?? null,
-      source: payload.source,
-    });
-  }, [promptSignInForNotes, user]);
-
-  const handleAddNote = useCallback(() => {
-    if (!user) {
-      promptSignInForNotes();
-      return;
-    }
-
-    rightColumnTabsRef.current?.switchToNotes();
-
-    setEditingNote({
-      text: "",
-      metadata: null,
-      source: "custom",
-    });
-  }, [user, promptSignInForNotes]);
-
-  const handleSaveEditingNote = useCallback(async ({ noteText, selectedText, metadata }: { noteText: string; selectedText: string; metadata?: NoteMetadata }) => {
-    if (!editingNote || !videoId) return;
-
-    // Use source from editing note or determine from metadata
-    let source: NoteSource = "custom";
-    if (editingNote.source) {
-      source = editingNote.source as NoteSource;
-    } else if (editingNote.metadata?.chat) {
-      source = "chat";
-    } else if (editingNote.metadata?.transcript) {
-      source = "transcript";
-    }
-
-    const normalizedSelected = selectedText.trim();
-    const mergedMetadata = normalizedSelected
-      ? {
-        ...(editingNote.metadata ?? {}),
-        ...(metadata ?? {}),
-        selectedText: normalizedSelected,
+      if (!response.ok) {
+        throw new Error(normalizeErrorMessage(payload, "Failed to generate Concept Map"));
       }
-      : {
-        ...(editingNote.metadata ?? {}),
-        ...(metadata ?? {})
-      };
 
-    await handleSaveNote({
-      text: noteText,
-      source,
-      sourceId: editingNote.metadata?.chat?.messageId ?? null,
-      metadata: mergedMetadata,
-    });
+      setConceptMap(payload.analysis ?? null);
+    } catch (error) {
+      console.error("Failed to generate Concept Map:", error);
+      setConceptMapError(
+        error instanceof Error
+          ? error.message
+          : "Failed to generate Concept Map. Please check your AI model settings."
+      );
+    } finally {
+      setConceptMapGenerationStartTime(null);
+      setIsGeneratingConceptMap(false);
+    }
+  }, [
+    currentVideoId,
+    isGeneratingConceptMap,
+    transcript,
+    transcriptMeta,
+    videoInfo,
+    videoRef,
+  ]);
 
-    // Clear editing state
-    setEditingNote(null);
-  }, [editingNote, videoId, handleSaveNote]);
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      return;
+    }
 
-  const handleCancelEditing = useCallback(() => {
-    setEditingNote(null);
-  }, []);
+    void loadVideoWorkspace();
+
+    return () => {
+      activeRequestRef.current?.abort();
+    };
+  }, [authLoading, loadVideoWorkspace, user]);
+
+  useEffect(() => {
+    if (
+      pageState === "ready" &&
+      user &&
+      transcript.length > 0 &&
+      videoInfo &&
+      videoRef &&
+      !conceptMap &&
+      !conceptMapError &&
+      !isGeneratingConceptMap
+    ) {
+      void handleGenerateConceptMap();
+    }
+  }, [
+    conceptMap,
+    conceptMapError,
+    handleGenerateConceptMap,
+    isGeneratingConceptMap,
+    pageState,
+    transcript.length,
+    user,
+    videoInfo,
+    videoRef,
+  ]);
+
+  if (authLoading || (user && (pageState === "idle" || pageState === "loading"))) {
+    return (
+      <section className="flex min-h-[calc(100vh-8rem)] flex-col items-center justify-center px-5 text-center">
+        <Loader2 className="mb-4 h-7 w-7 animate-spin text-slate-800" />
+        <p className="text-sm font-medium text-slate-700">
+          {authLoading ? "Checking session" : loadingMessage}
+        </p>
+      </section>
+    );
+  }
+
+  if (!user) {
+    return (
+      <>
+        <section className="flex min-h-[calc(100vh-8rem)] flex-col items-center justify-center px-5 pt-12 text-center">
+          <Card className="w-full max-w-md p-8">
+            <h1 className="text-xl font-semibold text-slate-950">Sign in to analyze videos</h1>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              LongCut uses your saved AI model settings to analyze YouTube and bilibili videos with captions.
+            </p>
+            <Button className="mt-5" onClick={() => setAuthModalOpen(true)}>
+              Sign in
+            </Button>
+          </Card>
+        </section>
+        <AuthModal
+          open={authModalOpen}
+          onOpenChange={setAuthModalOpen}
+          currentVideoId={currentVideoId}
+        />
+      </>
+    );
+  }
+
+  if (pageState === "error") {
+    return (
+      <section className="flex min-h-[calc(100vh-8rem)] flex-col items-center justify-center px-5 pt-12 text-center">
+        <Card className="w-full max-w-2xl p-8">
+          <AlertCircle className="mx-auto mb-4 h-7 w-7 text-red-500" />
+          <h1 className="text-xl font-semibold text-slate-950">Could not analyze this video</h1>
+          <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600">{error}</p>
+          <div className="mt-5 flex flex-wrap justify-center gap-3">
+            <Button onClick={loadVideoWorkspace}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Try again
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/">Go home</Link>
+            </Button>
+          </div>
+        </Card>
+      </section>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-white pt-12 pb-2">
-      {pageState === 'IDLE' && !videoId && !routeVideoId && !urlParam && (
-        <section className="flex min-h-[calc(100vh-11rem)] flex-col items-center justify-center px-5 text-center">
-          {error && (
-            <div className="mb-6 w-full max-w-2xl">
-              <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-medium text-red-600 shadow-sm">
-                {error}
-              </div>
-            </div>
-          )}
-          <Card className="w-full max-w-2xl border border-dashed border-slate-200 bg-white/80 p-9 backdrop-blur-sm">
-            <div className="space-y-3">
-              <h2 className="text-xl font-semibold text-slate-900">Ready to analyze a video?</h2>
-              <p className="text-xs leading-relaxed text-slate-600">
-                Head back to the home page to paste a YouTube link and generate highlight reels, searchable transcripts, and AI takeaways.
-              </p>
-              <div className="pt-1">
-                <Link
-                  href="/"
-                  className="inline-flex items-center justify-center rounded-full border border-slate-200 px-4 py-2 text-xs font-medium text-slate-700 transition hover:bg-[#f8fafc]"
-                >
-                  Go to home
-                </Link>
-              </div>
-            </div>
-          </Card>
-        </section>
-      )}
-
-      {pageState === 'LOADING_CACHED' && (
-        <section className="flex min-h-[calc(100vh-11rem)] items-center justify-center px-5">
-          <div className="w-full max-w-[1800px]">
-            <VideoSkeleton />
-          </div>
-        </section>
-      )}
-
-      {pageState === 'ANALYZING_NEW' && (
-        <section className="flex min-h-[calc(100vh-11rem)] flex-col items-center justify-center px-5">
-          {error && (
-            <div className="mb-6 w-full max-w-2xl">
-              <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-medium text-red-600 shadow-sm">
-                {error}
-              </div>
-            </div>
-          )}
-          <div className="flex flex-col items-center text-center">
-            <Loader2 className="mb-3.5 h-7 w-7 animate-spin text-primary" />
-            <p className="text-sm font-medium text-slate-700">
-              {switchingToLanguage
-                ? `Switching to ${getLanguageName(switchingToLanguage)}...`
-                : 'Loading video workspace'}
-            </p>
-            {!switchingToLanguage && (
-              <p className="mt-1.5 text-xs text-slate-500">
-                {loadingStage === 'fetching' && 'Fetching transcript...'}
-                {loadingStage === 'understanding' && 'Fetching transcript...'}
-              </p>
-            )}
-          </div>
-          <div className="mt-10 w-full max-w-2xl">
-            <LoadingContext
-              videoInfo={videoInfo}
-              preview={videoPreview}
-            />
-          </div>
-          <div className="w-full max-w-2xl">
-            <LoadingTips />
-          </div>
-        </section>
-      )}
-
-      {pageState === 'IDLE' && videoId && topics.length === 0 && error && (
-        <section className="flex min-h-[calc(100vh-11rem)] flex-col items-center justify-center px-5 text-center">
-          <Card className="w-full max-w-2xl border border-slate-200 bg-white/90 p-9 backdrop-blur-sm">
-            <div className="space-y-4">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-900">
-                  {isRateLimitError ? 'Monthly limit reached' : 'We couldn\'t finish analyzing this video'}
-                </h2>
-                <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-                  {isRateLimitError
-                    ? AUTH_LIMIT_MESSAGE
-                    : error}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-                <Link
-                  href="/"
-                  className="inline-flex items-center justify-center rounded-full border border-slate-200 px-4 py-2 text-xs font-medium text-slate-700 transition hover:bg-[#f8fafc]"
-                >
-                  Go to home
-                </Link>
-                {isRateLimitError && (
-                  <Link
-                    href="/pricing"
-                    className="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2 text-xs font-medium text-white transition hover:bg-blue-700"
-                  >
-                    Upgrade to Pro
-                  </Link>
-                )}
-                {!isRateLimitError && (
-                  <button
-                    type="button"
-                    onClick={() => processVideo(normalizedUrl, mode)}
-                    className="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white transition hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-50"
-                    disabled={isModeLoading}
-                  >
-                    Try again
-                  </button>
-                )}
-              </div>
-            </div>
-          </Card>
-        </section>
-      )}
-
-      {videoId && transcript.length > 0 && pageState === 'IDLE' && (
-        <div className="mx-auto w-full max-w-[1800px] px-5 pb-5 pt-0">
-          {error && (
-            <div className="mb-6 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-medium text-red-600 shadow-sm">
-              {error}
-            </div>
-          )}
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-            {/* Left Column - Video (2/3 width) */}
-            <div className="lg:col-span-2">
-              <div className="sticky top-[6.5rem] space-y-3.5" id="video-container">
-                {currentVideoRef?.platform === 'bilibili' ? (
-                  <BilibiliPlayer
-                    videoRef={currentVideoRef}
-                    fallbackVideoId={videoId}
-                    playbackCommand={playbackCommand}
-                    onCommandExecuted={clearPlaybackCommand}
-                  />
-                ) : (
-                  <YouTubePlayer
-                    key={videoId}
-                    ref={youtubePlayerRef}
-                    videoId={videoId}
-                    selectedTopic={selectedTopic}
-                    playbackCommand={playbackCommand}
-                    onCommandExecuted={clearPlaybackCommand}
-                    topics={topics}
-                    onTopicSelect={handleTopicSelect}
-                    onTimeUpdate={handleTimeUpdate}
-                    transcript={transcript}
-                    isPlayingAll={isPlayingAll}
-                    playAllIndex={playAllIndex}
-                    onTogglePlayAll={handleTogglePlayAll}
-                    setPlayAllIndex={memoizedSetPlayAllIndex}
-                    setIsPlayingAll={memoizedSetIsPlayingAll}
-                    renderControls={false}
-                    onDurationChange={setVideoDuration}
-                    selectedLanguage={selectedLanguage}
-                    onRequestTranslation={translateWithContext}
-                  />
-                )}
-                {optionalAnalysisFeatures.highlights && (themes.length > 0 || isLoadingThemeTopics || themeError || selectedTheme) && (
-                  <div className="flex justify-center">
-                    <ThemeSelector
-                      themes={themes}
-                      selectedTheme={selectedTheme}
-                      onSelect={handleThemeSelect}
-                      isLoading={isLoadingThemeTopics}
-                      error={themeError}
-                      selectedLanguage={selectedLanguage}
-                      onRequestTranslation={translateWithContext}
-                    />
-                  </div>
-                )}
-                <ConceptMapPanel
-                  analysis={conceptMap}
-                  isLoading={isGeneratingConceptMap}
-                  elapsedTime={conceptMapGenerationElapsedTime}
-                  error={conceptMapError}
-                  onGenerate={handleGenerateConceptMap}
-                  onSeek={requestSeek}
-                />
-                {optionalAnalysisFeatures.highlights && (
-                  <HighlightsPanel
-                    topics={topics}
-                    selectedTopic={selectedTopic}
-                    onTopicSelect={(topic) => handleTopicSelect(topic)}
-                    onPlayTopic={requestPlayTopic}
-                    onSeek={requestSeek}
-                    onPlayAll={handleTogglePlayAll}
-                    isPlayingAll={isPlayingAll}
-                    playAllIndex={playAllIndex}
-                    currentTime={currentTime}
-                    videoDuration={videoDuration}
-                    transcript={transcript}
-                    isLoadingThemeTopics={isLoadingThemeTopics}
-                    videoId={videoId ?? undefined}
-                    selectedLanguage={selectedLanguage}
-                    onRequestTranslation={translateWithContext}
-                    onGenerateHighlights={handleGenerateHighlights}
-                    isGeneratingHighlights={isGeneratingHighlights}
-                    highlightGenerationElapsedTime={highlightGenerationElapsedTime}
-                    highlightGenerationError={highlightGenerationError}
-                  />
-                )}
-              </div>
-            </div>
-
-            {/* Right Column - Tabbed Interface (1/3 width) */}
-            <div className="lg:col-span-1">
-              <div
-                className="sticky top-[6.5rem]"
-                id="right-column-container"
-                style={{ height: transcriptHeight, maxHeight: transcriptHeight, minHeight: 420 }}
-              >
-                <RightColumnTabs
-                  ref={rightColumnTabsRef}
-                  transcript={transcript}
-                  selectedTopic={selectedTopic}
-                  onTimestampClick={handleTimestampClick}
-                  currentTime={currentTime}
-                  topics={topics}
-                  citationHighlight={citationHighlight}
-                  videoId={videoId}
-                  videoTitle={videoInfo?.title}
-                  videoInfo={videoInfo}
-                  onCitationClick={handleCitationClick}
-                  showChatTab={optionalAnalysisFeatures.chat && showChatTab}
-                  showNotesTab={optionalAnalysisFeatures.notes}
-                  cachedSuggestedQuestions={optionalAnalysisFeatures.chat ? cachedSuggestedQuestions : null}
-                  notes={optionalAnalysisFeatures.notes ? notes : []}
-                  onSaveNote={optionalAnalysisFeatures.notes ? handleSaveNote : undefined}
-                  onTakeNoteFromSelection={optionalAnalysisFeatures.notes ? handleTakeNoteFromSelection : undefined}
-                  editingNote={optionalAnalysisFeatures.notes ? editingNote : null}
-                  onSaveEditingNote={optionalAnalysisFeatures.notes ? handleSaveEditingNote : undefined}
-                  onCancelEditing={optionalAnalysisFeatures.notes ? handleCancelEditing : undefined}
-                  onAddNote={optionalAnalysisFeatures.notes ? handleAddNote : undefined}
-                  isAuthenticated={!!user}
-                  onRequestSignIn={handleAuthRequired}
-                  selectedLanguage={selectedLanguage}
-                  onRequestTranslation={translateWithContext}
-                  onLanguageChange={(langCode) => {
-                    // Check if this is a request for a native transcript
-                    const availableLanguages = videoInfo?.availableLanguages || [];
-                    if (langCode && availableLanguages.includes(langCode)) {
-                      // It's a native language request
-                      if (videoInfo?.language !== langCode) {
-                         // Only re-fetch if it's different from current
-                         // Set language switching state for loading indicator
-                         setSwitchingToLanguage(langCode);
-                         processVideo(normalizedUrl, mode, langCode);
-                         // Clear any translation override
-                         handleLanguageChange(null);
-                      }
-                    } else {
-                      // It's a translation request
-                      handleLanguageChange(langCode);
-                    }
-                  }}
-                  availableLanguages={videoInfo?.availableLanguages}
-                  currentSourceLanguage={videoInfo?.language}
-                  onRequestExport={optionalAnalysisFeatures.transcriptExport ? handleRequestExport : undefined}
-                  exportButtonState={optionalAnalysisFeatures.transcriptExport ? exportButtonState : undefined}
-                />
-              </div>
-            </div>
-          </div>
+    <div className="mx-auto w-full max-w-[1800px] px-5 pb-8 pt-12 sm:pt-14">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+            {videoRef?.platform ?? extractedVideo?.platform ?? "video"}
+          </p>
+          <h1 className="mt-1 max-w-4xl text-2xl font-semibold leading-tight text-slate-950">
+            {videoInfo?.title ?? "Video analysis"}
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {videoInfo?.author ?? "Unknown creator"}
+            {videoInfo?.duration ? ` · ${formatDuration(videoInfo.duration)}` : ""}
+          </p>
         </div>
-      )}
+        <Button variant="outline" onClick={loadVideoWorkspace}>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Reload
+        </Button>
+      </div>
 
-      <AuthModal
-        open={authModalOpen}
-        onOpenChange={(open) => {
-          // Store video before modal opens
-          if (open && videoId && !user) {
-            storeCurrentVideoForAuth();
-          }
-          if (!open) {
-            setAuthModalTrigger('generation-limit');
-          }
-          setAuthModalOpen(open);
-        }}
-        trigger={authModalTrigger}
-        onSuccess={() => {
-          // Refresh rate limit info after successful auth
-          checkRateLimit();
-          // Check for pending video linking will happen via useEffect
-        }}
-        currentVideoId={videoId}
-      />
-      {optionalAnalysisFeatures.transcriptExport && (
-        <>
-          <TranscriptExportDialog
-            open={isExportDialogOpen}
-            onOpenChange={handleExportDialogOpenChange}
-            format={exportFormat}
-            onFormatChange={setExportFormat}
-            exportMode={exportMode}
-            onExportModeChange={setExportMode}
-            targetLanguage={targetLanguage}
-            onTargetLanguageChange={setTargetLanguage}
-            includeSpeakers={includeSpeakers}
-            onIncludeSpeakersChange={(value) => setIncludeSpeakers(value && hasSpeakerData)}
-            includeTimestamps={includeTimestamps}
-            onIncludeTimestampsChange={setIncludeTimestamps}
-            disableTimestampToggle={exportFormat === 'srt'}
-            onConfirm={handleConfirmExport}
-            isExporting={isExportingTranscript}
-            error={exportErrorMessage}
-            disableDownloadMessage={exportDisableMessage}
-            hasSpeakerData={hasSpeakerData}
-            willConsumeTopup={subscriptionStatus?.willConsumeTopup}
-            videoTitle={videoInfo?.title}
-            translationProgress={translationProgress}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_460px]">
+        <div className="space-y-4">
+          {videoRef?.platform === "bilibili" ? (
+            <BilibiliPlayer
+              videoRef={videoRef}
+              fallbackVideoId={currentVideoId}
+              playbackCommand={playbackCommand}
+              requestedSeekTime={bilibiliSeekTime}
+              onCommandExecuted={clearPlaybackCommand}
+            />
+          ) : (
+            <YouTubePlayer
+              key={currentVideoId}
+              ref={youtubePlayerRef}
+              videoId={currentVideoId}
+              selectedTopic={null}
+              playbackCommand={playbackCommand}
+              onCommandExecuted={clearPlaybackCommand}
+              topics={[]}
+              transcript={transcript}
+              renderControls={false}
+              compact={Boolean(conceptMap)}
+              onTimeUpdate={setCurrentTime}
+            />
+          )}
+
+          <ConceptMapPanel
+            analysis={conceptMap}
+            isLoading={isGeneratingConceptMap}
+            elapsedTime={conceptMapElapsedTime}
+            error={conceptMapError}
+            onGenerate={handleGenerateConceptMap}
+            onSeek={requestSeek}
           />
-          <TranscriptExportUpsell
-            open={showExportUpsell}
-            onOpenChange={setShowExportUpsell}
-            onUpgradeClick={handleUpgradeClick}
-          />
-        </>
-      )}
+        </div>
+
+        <aside className="lg:sticky lg:top-[6.5rem] lg:self-start">
+          <Card className="max-h-[calc(100vh-8rem)] overflow-hidden p-0">
+            <div className="border-b border-slate-200 px-4 py-3">
+              <h2 className="text-sm font-semibold text-slate-950">Transcript evidence</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                {transcript.length} transcript segments
+                {transcriptMeta?.language ? ` · ${transcriptMeta.language}` : ""}
+              </p>
+            </div>
+            <div className="max-h-[calc(100vh-13rem)] space-y-1 overflow-y-auto p-3">
+              {visibleTranscript.map((segment) => {
+                const isActive =
+                  currentTime >= segment.start && currentTime <= transcriptEnd(segment);
+
+                return (
+                  <button
+                    key={`${segment.start}-${segment.text.slice(0, 24)}`}
+                    type="button"
+                    onClick={() => requestSeek(segment.start)}
+                    className={`flex w-full items-start gap-2 rounded-md px-2 py-2 text-left transition ${
+                      isActive ? "bg-slate-900 text-white" : "hover:bg-slate-50"
+                    }`}
+                  >
+                    <span
+                      className={`mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${
+                        isActive ? "bg-white/15 text-white" : "bg-slate-100 text-slate-700"
+                      }`}
+                    >
+                      <Play className="h-3 w-3" />
+                      {formatDuration(segment.start)}
+                    </span>
+                    <span className={`text-sm leading-5 ${isActive ? "text-white" : "text-slate-600"}`}>
+                      {segment.text}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+        </aside>
+      </div>
     </div>
   );
 }

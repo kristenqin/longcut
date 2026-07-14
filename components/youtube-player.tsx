@@ -1,10 +1,9 @@
 "use client";
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import { Topic, TranscriptSegment, PlaybackCommand, TranslationRequestHandler } from "@/lib/types";
-import { formatDuration } from "@/lib/utils";
+import { Topic, TranscriptSegment, PlaybackCommand } from "@/lib/types";
+import { cn, formatDuration } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
-import { VideoProgressBar } from "@/components/video-progress-bar";
 
 interface YouTubePlayerProps {
   videoId: string;
@@ -24,8 +23,7 @@ interface YouTubePlayerProps {
   setIsPlayingAll?: (playing: boolean) => void;
   renderControls?: boolean;
   onDurationChange?: (duration: number) => void;
-  selectedLanguage?: string | null;
-  onRequestTranslation?: TranslationRequestHandler;
+  compact?: boolean;
 }
 
 export type YouTubePlayerHandle = {
@@ -52,10 +50,6 @@ export function getYouTubePlayerVars(origin?: string | null): YouTubePlayerVars 
 
 export function getYouTubePlayerElementId(videoId: string) {
   return `youtube-player-${videoId}`;
-}
-
-export function shouldRenderHighlightTimeline(videoDuration: number, topicCount: number) {
-  return videoDuration > 0 && topicCount > 0;
 }
 
 function hasPlayerMethod(player: unknown, methodName: string) {
@@ -133,15 +127,13 @@ function YouTubePlayerComponent({
   onPlayerReady,
   topics = [],
   onTopicSelect,
-  transcript = [],
   isPlayingAll = false,
   playAllIndex = 0,
   setPlayAllIndex,
   setIsPlayingAll,
   renderControls = true,
   onDurationChange,
-  selectedLanguage = null,
-  onRequestTranslation,
+  compact = false,
 }: YouTubePlayerProps, ref: Ref<YouTubePlayerHandle>) {
   const playerRef = useRef<any>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -533,33 +525,15 @@ function YouTubePlayerComponent({
     }
   }, [selectedTopic, isPlaying, isPlayingAll, citationReelSegmentIndex, syncSeekTime]);
 
-  const playTopic = (topic: Topic) => {
-    if (!playerRef.current || !topic || topic.segments.length === 0) return;
-
-    // If clicking a topic manually, exit play all mode
-    if (isPlayingAll) {
-      setIsPlayingAll?.(false);
-    }
-
-    // Seek to the start of the single segment and play
-    const segment = topic.segments[0];
-    playerRef.current.seekTo(segment.start, true);
-    syncSeekTime(segment.start);
-    playerRef.current.playVideo();
-  };
-
-
-
-  const handleSeek = (time: number) => {
-    playerRef.current?.seekTo(time, true);
-    syncSeekTime(time);
-  };
-
-
   return (
     <div className="w-full">
       <Card className="overflow-hidden shadow-sm p-0">
-        <div className="relative bg-black overflow-hidden aspect-video">
+        <div
+          className={cn(
+            "relative overflow-hidden bg-black aspect-video",
+            compact && "lg:h-[360px] lg:aspect-auto"
+          )}
+        >
           <div
             id={playerElementId}
             className="absolute top-0 left-0 w-full h-full"
@@ -568,23 +542,7 @@ function YouTubePlayerComponent({
 
         {renderControls && (
           <div className="p-3 bg-background border-t flex-shrink-0">
-            {shouldRenderHighlightTimeline(videoDuration, topics.length) && (
-              <VideoProgressBar
-                videoDuration={videoDuration}
-                currentTime={currentTime}
-                topics={topics}
-                selectedTopic={selectedTopic}
-                onSeek={handleSeek}
-                onTopicSelect={onTopicSelect}
-                onPlayTopic={playTopic}
-                transcript={transcript}
-                videoId={videoId}
-                selectedLanguage={selectedLanguage}
-                onRequestTranslation={onRequestTranslation}
-              />
-            )}
-
-            <div className="mt-4 flex items-center justify-between">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="ml-3 flex items-center gap-2">
                   <span className="text-sm font-mono text-muted-foreground">

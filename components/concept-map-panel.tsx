@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   AlertCircle,
   GitBranch,
@@ -81,6 +82,10 @@ function generationStage(elapsedTime: number) {
     label: generationStages[index].label,
     progress: Math.round(((index + 1) / generationStages.length) * 100),
   };
+}
+
+function isAISettingsError(error: string) {
+  return /api key|deepseek|provider|model|ai settings|ai model|configure|configuration|credential/i.test(error);
 }
 
 function conceptLabel(analysis: ConceptMapAnalysis, conceptId: string) {
@@ -337,9 +342,16 @@ export function ConceptMapPanel({
       </div>
 
       {error && (
-        <div className="mt-3 flex gap-2 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error}</span>
+        <div className="mt-3 flex flex-col gap-3 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+          {isAISettingsError(error) && (
+            <Button asChild size="sm" variant="outline" className="border-red-200 bg-white text-red-700 hover:bg-red-100">
+              <Link href="/settings">Go to Settings</Link>
+            </Button>
+          )}
         </div>
       )}
 

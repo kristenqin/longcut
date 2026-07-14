@@ -15,7 +15,9 @@ test('Concept Graph renders Concept Map data through React Flow and Dagre', () =
   assert.match(graphSource, /analysis\.concepts\.map/);
   assert.match(graphSource, /analysis\.relations\.filter/);
   assert.match(graphSource, /dagre\.layout\(graph\)/);
-  assert.match(graphSource, /onNodeClick=\{\(_, node\) => onSelectConcept\(node\.data\.concept\)\}/);
+  assert.match(graphSource, /onClick=\{selectConcept\}/);
+  assert.match(graphSource, /onKeyDown=\{\(event\) =>/);
+  assert.match(graphSource, /aria-pressed=\{data\.selected\}/);
 });
 
 test('Concept Map panel uses graph, inspector, and staged loading', () => {

@@ -31,15 +31,22 @@ test('Concept Map API preserves transcript source metadata when provided', () =>
   assert.match(routeSource, /source:\s*normalizeTranscriptSource\(parsedBody\.transcriptMeta\?\.source\)/);
 });
 
-test('Concept Map API is available to the MVP without requiring authentication', () => {
+test('Concept Map API requires authentication and CSRF protection', () => {
   const routeSource = readProjectFile('app/api/concept-map/route.ts');
 
   assert.match(routeSource, /CONCEPT_MAP_SECURITY/);
-  assert.match(routeSource, /csrfProtection:\s*false/);
-  assert.match(routeSource, /supabase\.auth\s*\n\s*\.getUser\(\)\s*\n\s*\.catch/);
-  assert.doesNotMatch(routeSource, /SECURITY_PRESETS\.AUTHENTICATED/);
-  assert.doesNotMatch(routeSource, /Authentication required/);
-  assert.doesNotMatch(routeSource, /user\.id\)\s*:\s*await/);
+  assert.match(routeSource, /requireAuth:\s*true/);
+  assert.match(routeSource, /csrfProtection:\s*true/);
+  assert.match(routeSource, /Authentication required/);
+  assert.doesNotMatch(routeSource, /getUser\(\)\s*\n\s*\.catch/);
+  assert.match(routeSource, /userId:\s*user\.id/);
+});
+
+test('Concept Map API uses platform-aware cache and transcript keys', () => {
+  const routeSource = readProjectFile('app/api/concept-map/route.ts');
+
+  assert.match(routeSource, /buildVideoCacheKey/);
+  assert.match(routeSource, /buildTranscriptIdPrefix/);
 });
 
 test('Concept Map API reports model analysis failures without collapsing to a generic 500', () => {

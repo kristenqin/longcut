@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
-import { clearCSRFToken } from '@/lib/csrf-client'
+import { clearCSRFToken, csrfFetch } from '@/lib/csrf-client'
 
 interface AuthContextType {
   user: User | null
@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     try {
       // Call server-side signout to clear HTTP-only cookies
-      await fetch('/api/auth/signout', { method: 'POST' })
+      await csrfFetch.post('/api/auth/signout')
       
       // Also sign out on client to clear any local state
       await supabase.auth.signOut()

@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/server';
-import type { SubscriptionTier } from '@/lib/subscription-manager';
 import crypto from 'crypto';
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
@@ -199,76 +198,26 @@ export class RateLimiter {
   }
 }
 
-// Preset configurations for different endpoints
+// Preset configurations for the remaining core endpoints.
 export const RATE_LIMITS = {
-  // Anonymous users
-  ANON_GENERATION: {
-    windowMs: 24 * 60 * 60 * 1000, // 24 hours
-    maxRequests: 1 // 1 generation per day
-  },
-  ANON_CHAT: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 10 // 10 messages per minute
-  },
-
-  // Authenticated users (legacy - kept for backwards compatibility)
   AUTH_GENERATION: {
-    windowMs: 60 * 60 * 1000, // 1 hour
-    maxRequests: 20 // 20 generations per hour
-  },
-  AUTH_VIDEO_GENERATION: {
-    windowMs: 24 * 60 * 60 * 1000, // 24 hours
-    maxRequests: 5 // 5 generations per day
-  },
-  AUTH_CHAT: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 30 // 30 messages per minute
+    windowMs: 60 * 60 * 1000,
+    maxRequests: 20
   },
 
-  // Suggested questions (lightweight, chat-like operation)
-  SUGGESTED_QUESTIONS: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 20 // 20 requests per minute
-  },
-
-  // Subscription tier video generation limits (rolling 30-day window)
-  VIDEO_GENERATION_FREE_UNREGISTERED: {
-    windowMs: 30 * 24 * 60 * 60 * 1000, // 30 days
-    maxRequests: 0 // No video analysis for anonymous users
-  },
-  VIDEO_GENERATION_FREE_REGISTERED: {
-    windowMs: 30 * 24 * 60 * 60 * 1000, // 30 days
-    maxRequests: 3 // 3 videos per 30 days for free registered users
-  },
-  VIDEO_GENERATION_PRO: {
-    windowMs: 30 * 24 * 60 * 60 * 1000, // 30 days
-    maxRequests: 100 // 100 videos per 30 days for Pro subscribers
-  },
-
-  // General API endpoints
   API_GENERAL: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 60 // 60 requests per minute
+    windowMs: 60 * 1000,
+    maxRequests: 60
   },
 
-  // Sensitive operations
   AUTH_ATTEMPT: {
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    maxRequests: 5 // 5 login attempts per 15 minutes
+    windowMs: 15 * 60 * 1000,
+    maxRequests: 5
   },
-  // Translation operations
-  ANON_TRANSLATION: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 100 // 100 API calls per minute for anonymous users (Google allows unlimited)
-  },
-  AUTH_TRANSLATION: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 500 // 500 API calls per minute for authenticated users (Google allows unlimited)
-  },
-  // Read-only endpoints (status checks, etc.)
+
   READ_ONLY: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 100 // 100 requests per minute
+    windowMs: 60 * 1000,
+    maxRequests: 100
   }
 };
 
@@ -299,17 +248,4 @@ export function rateLimitResponse(
   }
 
   return null; // Request allowed
-}
-
-export function getPlanLimiter(
-  tier: SubscriptionTier | 'anonymous'
-): RateLimitConfig {
-  switch (tier) {
-    case 'pro':
-      return RATE_LIMITS.VIDEO_GENERATION_PRO;
-    case 'free':
-      return RATE_LIMITS.VIDEO_GENERATION_FREE_REGISTERED;
-    default:
-      return RATE_LIMITS.VIDEO_GENERATION_FREE_UNREGISTERED;
-  }
 }
